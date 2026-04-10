@@ -892,6 +892,12 @@ async function refreshAccounts() {
               account.subscription_expires_at = dayjs.unix(item.data.subscription_expires_at).toISOString();
             }
             if (item.data.last_quota_update) account.last_quota_update = item.data.last_quota_update;
+            if (item.data.billing_strategy !== undefined) account.billing_strategy = item.data.billing_strategy;
+            if (item.data.daily_quota_remaining_percent !== undefined) account.daily_quota_remaining_percent = item.data.daily_quota_remaining_percent;
+            if (item.data.weekly_quota_remaining_percent !== undefined) account.weekly_quota_remaining_percent = item.data.weekly_quota_remaining_percent;
+            if (item.data.daily_quota_reset_at_unix !== undefined) account.daily_quota_reset_at_unix = item.data.daily_quota_reset_at_unix;
+            if (item.data.weekly_quota_reset_at_unix !== undefined) account.weekly_quota_reset_at_unix = item.data.weekly_quota_reset_at_unix;
+            if (item.data.overage_balance_micros !== undefined) account.overage_balance_micros = item.data.overage_balance_micros;
             account.status = 'active';
           } else {
             accountsStore.accounts[idx].status = 'error';
@@ -1338,6 +1344,12 @@ async function handleBatchRefresh() {
             if (item.data.used_quota !== undefined) latestAccount.used_quota = item.data.used_quota;
             if (item.data.total_quota !== undefined) latestAccount.total_quota = item.data.total_quota;
             if (item.data.expires_at) latestAccount.token_expires_at = item.data.expires_at;
+            if (item.data.billing_strategy !== undefined) latestAccount.billing_strategy = item.data.billing_strategy;
+            if (item.data.daily_quota_remaining_percent !== undefined) latestAccount.daily_quota_remaining_percent = item.data.daily_quota_remaining_percent;
+            if (item.data.weekly_quota_remaining_percent !== undefined) latestAccount.weekly_quota_remaining_percent = item.data.weekly_quota_remaining_percent;
+            if (item.data.daily_quota_reset_at_unix !== undefined) latestAccount.daily_quota_reset_at_unix = item.data.daily_quota_reset_at_unix;
+            if (item.data.weekly_quota_reset_at_unix !== undefined) latestAccount.weekly_quota_reset_at_unix = item.data.weekly_quota_reset_at_unix;
+            if (item.data.overage_balance_micros !== undefined) latestAccount.overage_balance_micros = item.data.overage_balance_micros;
             latestAccount.status = 'active';
             latestAccount.last_quota_update = dayjs().toISOString();
             accountsStore.updateAccount(latestAccount);
