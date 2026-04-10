@@ -1405,23 +1405,7 @@ async fn refresh_token_internal(
         if let Ok(result) = windsurf_service.get_plan_status(&token).await {
             if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
                 if let Some(plan_status) = result.get("plan_status") {
-                    if let Some(plan_name) = plan_status.get("plan_name").and_then(|v| v.as_str()) {
-                        updated_account.plan_name = Some(plan_name.to_string());
-                    }
-                    let used_prompt = plan_status.get("used_prompt_credits").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let used_flex = plan_status.get("used_flex_credits").and_then(|v| v.as_i64()).unwrap_or(0);
-                    updated_account.used_quota = Some((used_prompt + used_flex) as i32);
-                    
-                    let available_flex = plan_status.get("available_flex_credits").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let available_prompt = plan_status.get("available_prompt_credits").and_then(|v| v.as_i64()).unwrap_or(0);
-                    if available_flex > 0 || available_prompt > 0 {
-                        updated_account.total_quota = Some((available_flex + available_prompt) as i32);
-                    }
-                    
-                    if let Some(plan_end) = plan_status.get("plan_end").and_then(|v| v.as_i64()) {
-                        updated_account.subscription_expires_at = chrono::DateTime::from_timestamp(plan_end, 0);
-                    }
-                    updated_account.last_quota_update = Some(chrono::Utc::now());
+                    apply_plan_status_to_account(plan_status, &mut updated_account);
                 }
             }
         }
