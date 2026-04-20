@@ -6,7 +6,7 @@ A Windsurf multi-account management desktop application built with Tauri + Vue 3
 
 ## 📦 Project Information
 
-- **Current Version**: 1.7.3
+- **Current Version**: 1.7.5
 - **License**: AGPL-3.0
 - **Development Language**: Rust + TypeScript
 - **Supported Platforms**: Windows 10/11
@@ -124,6 +124,18 @@ A Windsurf multi-account management desktop application built with Tauri + Vue 3
 ---
 
 ## 📜 Version History
+
+### v1.7.5 (2026-04-20)
+- **Added Firebase ↔ Devin account auth-provider conversion**: Addresses the scenario where the official backend migrated some old Firebase accounts to Devin while passwords remained unchanged, making local `refresh_token` refresh fail. Added two backend commands `convert_account_to_devin` / `convert_account_to_firebase` that reuse the account's stored plaintext password to call the target system's official login endpoint and perform an atomic field switch. AccountCard second action row adds a "Convert Login Method" button with dynamic tooltip (`Firebase→Devin` / `Devin→Firebase`) based on current `auth_provider`; for Firebase→Devin multi-org scenarios, an inline `ElMessageBox + h()` radio list lets the user pick `org_id` and the command is called again with the selection. Design highlights: idempotent (when target == current, returns `already_converted=true` without any network call), atomic (network failure leaves local fields untouched), and post-switch enrichment via GetCurrentUser + GetPlanStatus to backfill quota fields
+- **Merged AddAccountDialog cards + mode-card grid restyle**: Removed the standalone "Devin Native Signup" card and merged it into the unified "Devin Email Code" card. After entering, users pick from two-level mode-card grids: `source` (Devin Native / Windsurf Side) + conditional `flow` (login / signup, only for Windsurf Side); Step 1 renders password/name fields based on `source+flow`. Added `sourceOptions` / `flowOptions` / `selectSource` / `selectFlow`; validation rules consolidated to `devinEmailCodeStep0/Step1/Step1Signup`; removed all legacy `devinNative*` state; `completeDevinNativeRegister` renamed to `completeDevinEmailCodeNativeRegister` reusing the unified `devinEmailCodeEmailToken` / `formData.devinEmailCodeOtp` state
+- **Fixed first-time WindsurfPostAuth 404 race condition**: `devin_auth_service.rs::post_auth_to_login_result` now does exponential backoff retry (1.5s / 3s / 5s, 3 attempts) specifically for `404 + no_eligible_organizations / not_found` errors, targeting the Devin server-side org sync delay that happens right after account creation (new `is_post_auth_org_sync_pending` helper precisely identifies the transient error). Covers `login_with_password` / `register_with_email_code` / `login_with_email_code` / `register_native_with_email_code`; all other errors remain fail-fast
+- **Added `enrich_account_with_plan_status` / `enrich_account_with_plan_status_inner`** (`devin_commands.rs`): Dedicated entry point for "call GetPlanStatus only and backfill account fields", sharing ctx construction logic with `enrich_account_with_user_info`
+- **Fixed QUOTA mode field loss on Devin register/login paths (A.1)**: `enrich_account_with_user_info` now calls GetPlanStatus after GetCurrentUser, uniformly backfilling `billing_strategy` / `daily_quota_remaining_percent` / `weekly_quota_remaining_percent` / `daily/weekly_quota_reset_at_unix` / `overage_balance_micros` etc., preventing the account card from downgrading to CREDITS-style display
+- **Fixed QUOTA field loss on Devin token import paths (A.2)**: `add_account_by_devin_session_token` / `add_account_by_devin_auth1_token` now explicitly call `enrich_account_with_plan_status` after `apply_user_info_to_account` to supplement QUOTA fields; the auth1_token path passes `&ctx.token` to avoid the E0502 borrow conflict where `account.token` has been moved into `Option`
+- **Fixed QUOTA field loss on Firebase refresh_token import path**: `account_commands.rs::add_account_by_refresh_token` adds a GetPlanStatus call + `apply_plan_status_to_account` after GetCurrentUser; added `use crate::commands::api_commands::apply_plan_status_to_account` import
+- **Fixed E0502 borrow conflict**: At `devin_commands.rs:1144`, `account.token` was moved into `Some(session_token)`, so later borrowing it immutably via `account.token.as_deref()` violated Rust borrow rules — switched to using the already-constructed `ctx.token` (same value as session_token, still owned and borrowable) for `enrich_account_with_plan_status`
+- **Unified version numbers**: `package.json` / `Cargo.toml` bumped from `1.7.3` to `1.7.5` to align with `tauri.conf.json`, eliminating the `tauri-action` version consistency check warning
+- **Scope**: All Devin Native / Windsurf Side email-code account creation paths and the Firebase refresh_token import path; systematically fixes the CREDITS downgrade issue; UI: 2 Devin email-code cards → 1 (main cards reduced from 8 to 7)
 
 ### v1.7.4 (2026-04-20)
 - **Added Auto-Update Feature (tauri-plugin-updater)**: Integrated official updater + process plugins. On app startup (3s delay), silently checks the latest release on GitHub Releases and automatically pops up the update dialog when a new version is available. Supports real-time download progress, one-click restart after install, per-version "skip this version" memory, and 24-hour check debounce
@@ -1150,6 +1162,7 @@ Windsurf Account Manager - Simple is a fully-featured Windsurf multi-account man
 - **v1.7.2**: Complete Devin account system support
 - **v1.7.3**: Devin refresh logic fix, key field backfill
 - **v1.7.4**: Auto-update integration (tauri-plugin-updater) with signed releases and unified latest.json
+- **v1.7.5**: Firebase↔Devin account auth-provider conversion, merged Devin email-code cards (mode-card grid), WindsurfPostAuth 404 retry, QUOTA field backfill across Devin register/login/import + Firebase refresh_token paths
 
 ### Future Plans
 - [ ] Support Linux and macOS platforms

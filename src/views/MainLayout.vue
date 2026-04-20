@@ -1857,6 +1857,25 @@ async function handleExportAccounts(selectedOnly: boolean = false) {
       }
     }
     
+    // 按待导出账号集合能力，决定 Devin 两个选项是否渲染
+    // - Auth1 Token：至少一个账号持有 devin_auth1_token
+    // - Session Token：至少一个 Devin 认证提供方账号且 token 非空
+    const hasDevinAuth1 = accounts.some(a => !!a.devin_auth1_token);
+    const hasDevinSession = accounts.some(a => a.auth_provider === 'devin' && !!a.token);
+
+    const devinAuth1OptionHtml = hasDevinAuth1 ? `
+          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
+            <input type="radio" name="exportContent" value="devin_auth1_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
+            <span style="font-weight: 500;">邮箱 + Devin Auth1 Token</span>
+            <span style="color: #909399; margin-left: 8px;">可二次换取 session / 换机迁移</span>
+          </label>` : '';
+    const devinSessionOptionHtml = hasDevinSession ? `
+          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
+            <input type="radio" name="exportContent" value="devin_session_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
+            <span style="font-weight: 500;">邮箱 + Devin Session Token</span>
+            <span style="color: #909399; margin-left: 8px;">当前登录会话凭证（短期有效）</span>
+          </label>` : '';
+
     // 创建 HTML 字符串形式的单选按钮
     const radioHtml = `
       <div style="padding: 20px 0;">
@@ -1871,7 +1890,7 @@ async function handleExportAccounts(selectedOnly: boolean = false) {
             <input type="radio" name="exportContent" value="refresh_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
             <span style="font-weight: 500;">邮箱 + Refresh Token</span>
             <span style="color: #909399; margin-left: 8px;">可直接刷新获取账号信息</span>
-          </label>
+          </label>${devinAuth1OptionHtml}${devinSessionOptionHtml}
         </div>
         <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #ebeef5;">
           <div style="font-weight: 500; margin-bottom: 10px; color: #606266;">导出格式</div>
@@ -1935,20 +1954,36 @@ async function handleExportAccounts(selectedOnly: boolean = false) {
     const target = selectedTargetRadio ? selectedTargetRadio.value : 'file';
     
     // 根据导出内容类型获取凭证
+    // devin_session_token 仅对 auth_provider==='devin' 的账号有意义：
+    // 旧 Firebase 账号的 token 字段持有 Firebase access_token，将其作为 Devin session 导出会产生误导，因此置空
     const getCredential = (account: any) => {
-      if (exportContent === 'refresh_token') {
-        return account.refresh_token || '';
+      switch (exportContent) {
+        case 'refresh_token':
+          return account.refresh_token || '';
+        case 'devin_auth1_token':
+          return account.devin_auth1_token || '';
+        case 'devin_session_token':
+          return account.auth_provider === 'devin' ? (account.token || '') : '';
+        case 'password':
+        default:
+          return account.password || '';
       }
-      return account.password || '';
     };
-    
-    const credentialLabel = exportContent === 'refresh_token' ? 'Refresh Token' : '密码';
-    const credentialKey = exportContent === 'refresh_token' ? 'refresh_token' : 'password';
-    
+
+    const credentialMeta: Record<string, { label: string; key: string; fileSuffix: string }> = {
+      password:            { label: '密码',                key: 'password',            fileSuffix: ''        },
+      refresh_token:       { label: 'Refresh Token',       key: 'refresh_token',       fileSuffix: '_token'  },
+      devin_auth1_token:   { label: 'Devin Auth1 Token',   key: 'devin_auth1_token',   fileSuffix: '_auth1'  },
+      devin_session_token: { label: 'Devin Session Token', key: 'devin_session_token', fileSuffix: '_session'},
+    };
+    const meta = credentialMeta[exportContent] || credentialMeta.password;
+    const credentialLabel = meta.label;
+    const credentialKey = meta.key;
+
     let content = '';
     let filename = '';
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-    const fileSuffix = exportContent === 'refresh_token' ? '_token' : '';
+    const fileSuffix = meta.fileSuffix;
     
     switch(format) {
       case '1': // CSV

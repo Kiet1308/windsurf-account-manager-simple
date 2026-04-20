@@ -341,6 +341,19 @@
             :loading="isSwitching"
           />
         </el-tooltip>
+
+        <!-- 转换登录方式（Firebase ↔ Devin）：按当前 auth_provider 动态切换 tooltip 与动作 -->
+        <el-tooltip :content="convertActionLabel" placement="top">
+          <el-button
+            size="small"
+            :icon="Connection"
+            circle
+            type="warning"
+            plain
+            @click="handleConvertAuthProvider"
+            :loading="isConvertingAuth"
+          />
+        </el-tooltip>
       </div>
     </div>
   </div>
@@ -494,10 +507,12 @@ import {
   Refresh,
   CircleCheck,
   CircleClose,
+  Connection,
   Loading,
 } from '@element-plus/icons-vue';
+import { h } from 'vue';
 import type { Account } from '@/types';
-import { apiService, accountApi } from '@/api';
+import { apiService, accountApi, devinApi } from '@/api';
 import { useAccountsStore, useUIStore, useSettingsStore } from '@/store';
 import UpdateSeatsResultDialog from '@/components/UpdateSeatsResultDialog.vue';
 import CreditHistoryDialog from '@/components/CreditHistoryDialog.vue';
@@ -1242,6 +1257,146 @@ async function handleLogin() {
 
 function handleEdit() {
   uiStore.openEditAccountDialog(props.account.id);
+}
+
+// ==================== Firebase ↔ Devin 登录方式互转 ====================
+
+/** 当前账号的转换按钮 tooltip 文案（按 auth_provider 动态） */
+const convertActionLabel = computed(() => {
+  return props.account.auth_provider === 'devin'
+    ? '转换为 Firebase 登录方式'
+    : '转换为 Devin 登录方式';
+});
+
+const isConvertingAuth = ref(false);
+
+/**
+ * 从 orgs 列表弹框让用户选择一个组织，返回选中的 org_id；用户取消返回 null。
+ *
+ * 用于 Firebase→Devin 转换时企端返回多个 org 的二次交互。这里使用轻量的
+ * ElMessageBox + h() 渲染 radio list，避免引入额外 dialog 组件。
+ */
+async function selectOrgInteractively(
+  orgs: Array<{ id: string; name: string }>,
+): Promise<string | null> {
+  if (!orgs.length) return null;
+  if (orgs.length === 1) return orgs[0].id;
+
+  const selected = ref<string>(orgs[0].id);
+  try {
+    await ElMessageBox({
+      title: '选择组织',
+      message: () =>
+        h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;' },
+          orgs.map((org) =>
+            h(
+              'label',
+              {
+                style: 'display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--el-border-color-light);',
+              },
+              [
+                h('input', {
+                  type: 'radio',
+                  name: 'convert-org',
+                  value: org.id,
+                  checked: selected.value === org.id,
+                  onChange: () => {
+                    selected.value = org.id;
+                  },
+                }),
+                h('div', { style: 'flex: 1; min-width: 0;' }, [
+                  h('div', { style: 'font-weight: 500;' }, org.name || '(未命名组织)'),
+                  h('div', { style: 'font-size: 12px; color: var(--el-text-color-secondary); word-break: break-all;' }, org.id),
+                ]),
+              ],
+            ),
+          ),
+        ),
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      showCancelButton: true,
+      customClass: 'convert-org-select-dialog',
+    });
+  } catch {
+    return null;
+  }
+  return selected.value || null;
+}
+
+/**
+ * 转换当前账号的登录体系（Firebase ↔ Devin）
+ *
+ * 内部按当前 auth_provider 分派：
+ * - Devin 账号 → convert_account_to_firebase
+ * - Firebase 账号 → convert_account_to_devin，多组织时弹选择后再次调用并传 orgId
+ *
+ * 失败时本地账号字段不改（后端已实现原子性）。
+ */
+async function handleConvertAuthProvider() {
+  const isDevin = props.account.auth_provider === 'devin';
+  const targetLabel = isDevin ? 'Firebase' : 'Devin';
+  const sourceLabel = isDevin ? 'Devin' : 'Firebase';
+
+  try {
+    await ElMessageBox.confirm(
+      `即将将账号 ${props.account.nickname || props.account.email} 的登录方式从 【${sourceLabel}】 转换为 【${targetLabel}】。\n\n` +
+        `操作会复用账号已存的明文密码调用 ${targetLabel} 的官方登录接口，成功后自动切换账号字段。\n` +
+        `失败时帐号字段保持不变。\n\n确定继续吗？`,
+      `转换为 ${targetLabel} 登录方式`,
+      {
+        confirmButtonText: `转换为 ${targetLabel}`,
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    );
+  } catch {
+    return;
+  }
+
+  isConvertingAuth.value = true;
+  try {
+    if (isDevin) {
+      const result = await devinApi.convertAccountToFirebase({ id: props.account.id });
+      if (result.success) {
+        ElMessage.success(result.message || '已转换为 Firebase 登录体系');
+        await accountsStore.loadAccounts();
+      } else if (result.already_converted) {
+        ElMessage.info(result.message || '账号已是 Firebase 体系');
+      } else {
+        ElMessage.warning(result.message || '转换未完成');
+      }
+      return;
+    }
+
+    // Firebase → Devin：首次调用不传 orgId
+    let result = await devinApi.convertAccountToDevin({ id: props.account.id });
+
+    // 多组织分支：弹选择后再次调用并传 orgId
+    if (result.requires_org_selection && result.orgs && result.orgs.length > 0) {
+      const chosenOrgId = await selectOrgInteractively(result.orgs);
+      if (!chosenOrgId) {
+        ElMessage.info('已取消多组织选择');
+        return;
+      }
+      result = await devinApi.convertAccountToDevin({
+        id: props.account.id,
+        orgId: chosenOrgId,
+      });
+    }
+
+    if (result.success) {
+      ElMessage.success(result.message || '已转换为 Devin 登录体系');
+      await accountsStore.loadAccounts();
+    } else if (result.already_converted) {
+      ElMessage.info(result.message || '账号已是 Devin 体系');
+    } else {
+      ElMessage.warning(result.message || '转换未完成');
+    }
+  } catch (error: any) {
+    ElMessage.error(`转换登录方式失败：${error?.message || error || '未知错误'}`);
+  } finally {
+    isConvertingAuth.value = false;
+  }
 }
 
 function handleAccountInfo() {

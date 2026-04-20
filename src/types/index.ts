@@ -151,6 +151,48 @@ export interface EmailStartResponse {
 }
 
 /**
+ * `devin_check_connections` / `devin_app_check_connections` 的响应结构
+ *
+ * 查询邮箱在 Devin 侧（Windsurf 同源或 app.devin.ai 原生）可用的连接方式。
+ * 原始 JSON 透传在 `connections` / `auth_method` 等字段中；服务端可能返回额外字段。
+ */
+export interface ConnectionsResponse {
+  /** 可用的连接方式列表（`email` / `google` / `github` / `windsurf-bridge` / SSO 等） */
+  connections?: Array<{
+    id: string | null;
+    type: string;
+    enabled: boolean;
+    client_id: string | null;
+    [key: string]: any;
+  }>;
+  /** 邮箱的认证方法判定 */
+  auth_method?: {
+    /** `"not_found"` | `"auth1"` | 其他 */
+    method?: string;
+    has_password?: boolean;
+    sso_connections?: any[] | null;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}
+
+/**
+ * `devin_password_login` / `devin_email_complete` / `devin_app_email_complete` 的响应结构
+ *
+ * 实测响应：`{ "token": "auth1_<52>", "user_id": "user-<32>", "email": "..." }`
+ * 字段别名同时兼容 `auth1_token` / `account_id` 等历史命名。
+ */
+export interface DevinPasswordLoginResponse {
+  /** 一级认证令牌（格式：`auth1_<52 字符随机>`） */
+  auth1_token: string;
+  /** Devin 账号/用户 ID（格式：`user-<32 字符>`） */
+  account_id?: string | null;
+  /** 服务端回显的邮箱 */
+  email?: string | null;
+  [key: string]: any;
+}
+
+/**
  * add_account_by_devin_login / add_account_by_devin_email_login 的响应结构
  */
 export interface DevinLoginResult {

@@ -6,7 +6,7 @@
 
 ## 📦 项目信息
 
-- **当前版本**: 1.7.3
+- **当前版本**: 1.7.5
 - **许可证**: AGPL-3.0
 - **开发语言**: Rust + TypeScript
 - **支持平台**: Windows 10/11
@@ -124,6 +124,18 @@
 ---
 
 ## 📜 版本历史
+
+### v1.7.5 (2026-04-20)
+- **新增 Firebase ↔ Devin 账号登录方式互转**：针对官方将部分老 Firebase 账号迁移到 Devin 体系（密码未变）导致本地 refresh_token 刷新失败的场景，新增后端双命令 `convert_account_to_devin` / `convert_account_to_firebase`，复用账号已存明文密码走目标体系的官方登录接口完成原子切换；账号卡操作第二排末尾加「转换登录方式」按钮，tooltip 按当前 `auth_provider` 动态切换（`Firebase→Devin` / `Devin→Firebase`）；Firebase→Devin 多组织场景内联 `ElMessageBox + h()` 渲染 radio list 让用户选 `org_id` 后二次提交。设计要点：幂等（目标体系=当前体系时直接 `already_converted=true` 无网络请求）；原子性（网络失败本地字段零改动）；切换成功自动调 GetCurrentUser + GetPlanStatus 补齐配额字段
+- **新增 AddAccountDialog 合并卡片 + mode-card 网格美化**：删除独立的「Devin 原生注册」卡片，与「Devin 邮箱验证码」合并为统一单卡；进入后以两级 mode-card 网格子单选切换来源（`Devin 原生` / `Windsurf 侧`）与子流程（`login` / `signup`，仅 Windsurf 侧需要），Step 1 按 `source+flow` 动态渲染密码/姓名字段。新增 `sourceOptions` / `flowOptions` / `selectSource` / `selectFlow`，验证规则合并为 `devinEmailCodeStep0/Step1/Step1Signup`，原 `devinNative*` 状态全部清除，业务函数 `completeDevinNativeRegister` 重命名为 `completeDevinEmailCodeNativeRegister` 并复用合并后的 `devinEmailCodeEmailToken` / `formData.devinEmailCodeOtp` 统一状态
+- **修复 WindsurfPostAuth 首次 404 时序竞态**：`devin_auth_service.rs` 的 `post_auth_to_login_result` 针对 "Devin 新建账号 → 立刻 PostAuth" 服务端 org 同步延迟，对 `404 + no_eligible_organizations / not_found` 特定错误做 1.5s / 3s / 5s 共 3 次指数退避重试（新增 `is_post_auth_org_sync_pending` 精确识别辅助函数），覆盖 `login_with_password` / `register_with_email_code` / `login_with_email_code` / `register_native_with_email_code` 四条汇聚路径；其他错误保持 fail-fast 不重试
+- **新增 `enrich_account_with_plan_status` / `enrich_account_with_plan_status_inner`**（`devin_commands.rs`）：提供"仅调 GetPlanStatus 并回填账号字段"的独立入口，与 `enrich_account_with_user_info` 共享 ctx 构造逻辑
+- **修复 Devin 注册/登录路径 QUOTA 模式字段缺失（A.1）**：`enrich_account_with_user_info` 内部在 GetCurrentUser 之后追加一次 GetPlanStatus 调用，统一补齐 `billing_strategy` / `daily_quota_remaining_percent` / `weekly_quota_remaining_percent` / `daily/weekly_quota_reset_at_unix` / `overage_balance_micros` 等 QUOTA 模式专用字段，避免账号卡降级到 CREDITS 积分显示
+- **修复 Devin 迁入路径 QUOTA 字段缺失（A.2）**：`add_account_by_devin_session_token` / `add_account_by_devin_auth1_token` 两条已有 user_info 的路径在 `apply_user_info_to_account` 后显式调 `enrich_account_with_plan_status` 单独补齐 QUOTA 字段；auth1_token 路径改用 `&ctx.token` 传参，规避 `account.token` 已被 move 进 Option 期间无法再借用的 E0502 借用冲突
+- **修复 Firebase refresh_token 迁入路径 QUOTA 字段缺失**：`account_commands.rs` 的 `add_account_by_refresh_token` 在 GetCurrentUser 之后补一次 GetPlanStatus + `apply_plan_status_to_account` 回填；头部新增 `use crate::commands::api_commands::apply_plan_status_to_account` 复用字段映射
+- **修复 E0502 借用冲突**：`devin_commands.rs:1144` 处 `account.token` 已被 move 到 `Some(session_token)` 后，若再以 `account.token.as_deref()` 不可变借用会违反借用规则——改用上方构造好的 `ctx.token`（与 session_token 同值，仍 owned 可借）传入 `enrich_account_with_plan_status`
+- **统一版本号**：`package.json` / `Cargo.toml` 从 `1.7.3` 同步到 `1.7.5`，与 `tauri.conf.json` 对齐，消除 GitHub Actions `tauri-action` 版本一致性检查告警
+- **影响范围**：所有使用 Devin 原生 / Windsurf 侧邮箱验证码 / Firebase refresh_token 建号的路径；配额显示从 CREDITS 降级问题系统性修复；UI 层原 2 张 Devin 邮箱验证码卡 → 1 张（主卡从 8 减到 7）
 
 ### v1.7.4 (2026-04-20)
 - **新增 自动更新功能 (tauri-plugin-updater)**: 集成官方 updater + process 插件，应用启动后 3 秒静默检测 GitHub Releases 最新版本，发现新版时自动弹出更新对话框；支持下载进度实时展示、安装后一键重启、"跳过此版本"本地记忆、24 小时检测防抖

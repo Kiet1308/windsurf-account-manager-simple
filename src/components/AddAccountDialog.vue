@@ -170,11 +170,26 @@
         </el-form-item>
       </template>
 
-      <!-- Devin 邮箱验证码模式：两步流程，按 flow 区分 login / signup -->
+      <!-- Devin 邮箱验证码统一卡：两步流程；Step 0 选择 source / flow，Step 1 按 source+flow 渲染字段 -->
       <template v-else-if="addMode === 'devin_email_code'">
-        <!-- 顶部说明：按 flow 动态文案 -->
+        <!-- 顶部说明：按 source + flow 动态文案 -->
         <el-alert
-          v-if="devinEmailCodeFlow === 'signup'"
+          v-if="devinEmailCodeSource === 'devin_native'"
+          type="success"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 16px;"
+        >
+          <template #title>
+            <span style="font-size: 12px;">
+              <strong>Devin 原生注册</strong>：通过 <code>app.devin.ai/api/auth1/*</code> 端口建号，
+              账号主归属 <strong>Devin</strong>（JWT product=Devin），注册后自动桥接 Windsurf。
+              <strong>只需邮箱 + 验证码两步</strong>，不需要设置密码/姓名。
+            </span>
+          </template>
+        </el-alert>
+        <el-alert
+          v-else-if="devinEmailCodeFlow === 'signup'"
           type="warning"
           :closable="false"
           show-icon
@@ -182,8 +197,8 @@
         >
           <template #title>
             <span style="font-size: 12px;">
-              <strong>注册新 Devin 账号</strong>：通过邮箱验证码创建新账号，需设置密码和姓名。
-              <strong>此流程会创建新账号并落库</strong>。
+              <strong>Windsurf 侧注册</strong>：通过 <code>windsurf.com/_devin-auth/*</code> 端口创建新账号，
+              需设置密码和姓名。<strong>此流程会创建新账号并落库</strong>。
             </span>
           </template>
         </el-alert>
@@ -196,33 +211,106 @@
         >
           <template #title>
             <span style="font-size: 12px;">
-              适用于已存在的 Devin 账号但无密码（SSO 迁移 / 忘记密码 / Google・GitHub 登录过的账号）：
-              通过邮箱验证码登录并添加。<strong>此流程不会创建新账号</strong>。
+              <strong>Windsurf 侧无密码登录</strong>：适用已存在 Devin 账号但无密码的场景
+              （SSO 迁移 / 忘记密码 / Google・GitHub 登录过的账号），通过邮箱验证码登录并添加。
+              <strong>此流程不会创建新账号</strong>。
             </span>
           </template>
         </el-alert>
 
         <el-steps :active="devinEmailCodeStep" finish-status="success" simple style="margin-bottom: 20px;">
-          <el-step title="发送验证码" />
-          <el-step :title="devinEmailCodeFlow === 'signup' ? '完成注册' : '输入验证码'" />
+          <el-step title="选择来源 / 发送验证码" />
+          <el-step :title="devinEmailCodeSource === 'windsurf_side' && devinEmailCodeFlow === 'signup' ? '完成注册' : (devinEmailCodeSource === 'devin_native' ? '完成注册' : '输入验证码')" />
         </el-steps>
 
-        <!-- Step 0：输入邮箱 -->
+        <!-- Step 0：选择 source + 可选 flow + 输入邮箱 -->
         <template v-if="devinEmailCodeStep === 0">
+          <!-- 注册来源：mode-card 网格，与主「添加方式」卡片风格对齐 -->
+          <el-form-item label="注册来源">
+            <div class="mode-grid" role="radiogroup" aria-label="注册来源">
+              <div
+                v-for="opt in sourceOptions"
+                :key="opt.value"
+                class="mode-card"
+                :class="{ 'is-active': devinEmailCodeSource === opt.value }"
+                :title="opt.desc"
+                role="radio"
+                :aria-checked="devinEmailCodeSource === opt.value"
+                tabindex="0"
+                @click="selectSource(opt.value)"
+                @keydown.enter.prevent="selectSource(opt.value)"
+                @keydown.space.prevent="selectSource(opt.value)"
+              >
+                <el-icon class="mode-card__icon">
+                  <component :is="opt.icon" />
+                </el-icon>
+                <span class="mode-card__title">{{ opt.title }}</span>
+                <el-tag
+                  v-if="opt.tag"
+                  :type="opt.tagType"
+                  size="small"
+                  effect="light"
+                  class="mode-card__tag"
+                >
+                  {{ opt.tag }}
+                </el-tag>
+                <el-icon v-if="devinEmailCodeSource === opt.value" class="mode-card__check">
+                  <Check />
+                </el-icon>
+              </div>
+            </div>
+          </el-form-item>
+
+          <!-- 子流程：仅 Windsurf 侧需要区分 login / signup；Devin 原生只有 signup -->
+          <el-form-item v-if="devinEmailCodeSource === 'windsurf_side'" label="子流程">
+            <div class="mode-grid" role="radiogroup" aria-label="子流程">
+              <div
+                v-for="opt in flowOptions"
+                :key="opt.value"
+                class="mode-card"
+                :class="{ 'is-active': devinEmailCodeFlow === opt.value }"
+                :title="opt.desc"
+                role="radio"
+                :aria-checked="devinEmailCodeFlow === opt.value"
+                tabindex="0"
+                @click="selectFlow(opt.value)"
+                @keydown.enter.prevent="selectFlow(opt.value)"
+                @keydown.space.prevent="selectFlow(opt.value)"
+              >
+                <el-icon class="mode-card__icon">
+                  <component :is="opt.icon" />
+                </el-icon>
+                <span class="mode-card__title">{{ opt.title }}</span>
+                <el-tag
+                  v-if="opt.tag"
+                  :type="opt.tagType"
+                  size="small"
+                  effect="light"
+                  class="mode-card__tag"
+                >
+                  {{ opt.tag }}
+                </el-tag>
+                <el-icon v-if="devinEmailCodeFlow === opt.value" class="mode-card__check">
+                  <Check />
+                </el-icon>
+              </div>
+            </div>
+          </el-form-item>
+
           <el-form-item label="邮箱" prop="email">
             <el-input
               v-model="formData.email"
-              placeholder="请输入 Devin 账号邮箱"
+              :placeholder="devinEmailCodeSource === 'devin_native' ? '请输入用于注册的新邮箱' : '请输入 Devin 账号邮箱'"
               :prefix-icon="Message"
               autocomplete="off"
             />
           </el-form-item>
         </template>
 
-        <!-- Step 1：输入验证码（signup flow 额外要求新密码 + 姓名） -->
+        <!-- Step 1：输入验证码（按 source + flow 决定是否额外要密码/姓名） -->
         <template v-else>
           <el-alert
-            v-if="devinEmailCodeFlow === 'signup'"
+            v-if="devinEmailCodeSource === 'windsurf_side' && devinEmailCodeFlow === 'signup'"
             type="warning"
             :closable="false"
             show-icon
@@ -250,8 +338,8 @@
             />
           </el-form-item>
 
-          <!-- signup flow 专属字段 -->
-          <template v-if="devinEmailCodeFlow === 'signup'">
+          <!-- 仅 source=windsurf_side + flow=signup 需要密码/姓名 -->
+          <template v-if="devinEmailCodeSource === 'windsurf_side' && devinEmailCodeFlow === 'signup'">
             <el-form-item label="新密码" prop="devinEmailCodePassword">
               <el-input
                 v-model="formData.devinEmailCodePassword"
@@ -357,7 +445,7 @@
     <template #footer>
       <el-button @click="handleClose">取消</el-button>
 
-      <!-- Devin 邮箱验证码模式：按 step 动态按钮 -->
+      <!-- Devin 邮箱验证码合并卡：按 step + source + flow 动态按钮文案 -->
       <template v-if="addMode === 'devin_email_code'">
         <el-button v-if="devinEmailCodeStep === 1" @click="devinEmailCodeStep = 0" :disabled="loading">
           上一步
@@ -365,11 +453,13 @@
         <el-button type="primary" @click="handleSubmit" :loading="loading">
           {{ devinEmailCodeStep === 0
               ? '发送验证码'
-              : (devinEmailCodeFlow === 'signup' ? '完成注册' : '完成添加') }}
+              : (devinEmailCodeSource === 'devin_native'
+                  ? '完成 Devin 原生注册'
+                  : (devinEmailCodeFlow === 'signup' ? '完成注册' : '完成添加')) }}
         </el-button>
       </template>
 
-      <!-- 其他模式：统一“确定”按钮 -->
+      <!-- 其他模式：统一"确定"按钮 -->
       <el-button v-else type="primary" @click="handleSubmit" :loading="loading">
         确定
       </el-button>
@@ -395,14 +485,26 @@ const formRef = ref<FormInstance>();
 const loading = ref(false);
 const addMode = ref<'smart' | 'password' | 'refresh_token' | 'devin' | 'devin_session' | 'devin_auth1' | 'devin_email_code'>('smart');
 
-// Devin 邮箱验证码登录的两步状态（mode === 'devin_email_code' 专属）
+// Devin 邮箱验证码合并卡（mode === 'devin_email_code' 专属）的状态：
+//   - step 0：选择 source / flow + 输入邮箱 + 发送验证码
+//   - step 1：输入验证码（按 source+flow 可能额外填密码/姓名）
+//
+// source：一级子单选
+//   - 'devin_native'【原来的 devin_native_signup 卡合并而来】
+//     端口走 app.devin.ai/api/auth1/*，账号主归属 Devin（JWT product=Devin）+ 自动桥接 Windsurf
+//     只有 signup 子流程，不需密码/姓名
+//   - 'windsurf_side'
+//     端口走 windsurf.com/_devin-auth/*，账号主归属 Windsurf
+//     支持 flow=login / signup；signup 需密码+姓名
+const devinEmailCodeSource = ref<'devin_native' | 'windsurf_side'>('devin_native');
 // step 0：输入邮箱 + 发送验证码；step 1：输入验证码 + 完成登录/注册
 const devinEmailCodeStep = ref<0 | 1>(0);
 // /email/start 返回的 email_verification_token，用于后续 /email/complete
 const devinEmailCodeEmailToken = ref('');
-// 验证码子流程：login=登录已有无密码账号；signup=注册新账号
-// - 从 radio 主入口直接选 devin_email_code 时默认 'login'
-// - 从智能识别 not_found 分派快捷按钮进入时自动设为 'signup'
+// flow：仅在 source==='windsurf_side' 时生效，当 source==='devin_native' 时满量视作 'signup'
+//   - 'login'：登录已有无密码账号（SSO 迁移 / 忘密 / Google・GitHub 登录过的账号）
+//   - 'signup'：注册新账号（额外要密码+姓名）
+//   - 从 smart 分派 not_found 快捷按钮进入时自动设为 'signup' + source=windsurf_side
 const devinEmailCodeFlow = ref<'login' | 'signup'>('login');
 
 const formData = reactive({
@@ -450,10 +552,10 @@ const modeOptions = [
   {
     value: 'devin_email_code',
     title: 'Devin 邮箱验证码',
-    desc: 'SSO / 无密码账号用验证码登录或注册',
+    desc: '原生（app.devin.ai）或 Windsurf 侧验证码登录/注册，进入后选择来源',
     icon: Message,
-    tag: '无密码',
-    tagType: 'info' as const,
+    tag: '验证码',
+    tagType: 'success' as const,
   },
   {
     value: 'devin_session',
@@ -490,6 +592,55 @@ const modeOptions = [
 ] as const;
 
 /**
+ * Devin 邮箱验证码合并卡 —— source 子单选的卡片元数据
+ *
+ * 与主 modeOptions 结构对齐：icon + title + desc + tag + tagType，
+ * 复用 .mode-grid / .mode-card 的现有样式，不新增 CSS。
+ */
+const sourceOptions = [
+  {
+    value: 'devin_native',
+    title: 'Devin 原生',
+    desc: 'app.devin.ai，账号主归属 Devin + 自动桥接 Windsurf',
+    icon: Message,
+    tag: '原生',
+    tagType: 'success' as const,
+  },
+  {
+    value: 'windsurf_side',
+    title: 'Windsurf 侧',
+    desc: 'windsurf.com，账号主归属 Windsurf',
+    icon: Connection,
+    tag: 'WS',
+    tagType: 'info' as const,
+  },
+] as const;
+
+/**
+ * Devin 邮箱验证码合并卡 —— flow 子单选的卡片元数据
+ *
+ * 仅在 source='windsurf_side' 时渲染。
+ */
+const flowOptions = [
+  {
+    value: 'login',
+    title: '登录无密码账号',
+    desc: 'SSO / 忘密 / Google・GitHub 登录过的账号',
+    icon: Key,
+    tag: '登录',
+    tagType: 'info' as const,
+  },
+  {
+    value: 'signup',
+    title: '注册新账号',
+    desc: '需额外设置密码与姓名',
+    icon: User,
+    tag: '注册',
+    tagType: 'warning' as const,
+  },
+] as const;
+
+/**
  * 切换添加方式
  *
  * 卡片点击时由模板调用；内部直接写入 `addMode` 并复用原有的 `handleModeChange`
@@ -499,6 +650,41 @@ function selectMode(value: string) {
   if (addMode.value === value) return;
   addMode.value = value as typeof addMode.value;
   handleModeChange();
+}
+
+/**
+ * Devin 邮箱验证码合并卡——切换 source（原生 / Windsurf 侧）
+ *
+ * 切换来源时必须重置 step / token / 验证码输入，避免用户在已发过一次验证码后
+ * 切换到另一端口，旧 token 被窜修改到新端口的提交逻辑而失败。
+ * formData.email / nickname / tags / group 不重置，保留用户已输入内容。
+ */
+function selectSource(value: string) {
+  const next = value as typeof devinEmailCodeSource.value;
+  if (devinEmailCodeSource.value === next) return;
+  devinEmailCodeSource.value = next;
+  devinEmailCodeStep.value = 0;
+  devinEmailCodeEmailToken.value = '';
+  formData.devinEmailCodeOtp = '';
+  formData.devinEmailCodePassword = '';
+  formData.devinEmailCodeName = '';
+}
+
+/**
+ * Devin 邮箱验证码合并卡——切换 flow（login / signup）
+ *
+ * 仅在 source='windsurf_side' 时有意义。切换时同样重置 step / token / 验证码输入，
+ * 因为 login 和 signup 的 /email/start mode 不同，旧 token 不能复用。
+ */
+function selectFlow(value: string) {
+  const next = value as typeof devinEmailCodeFlow.value;
+  if (devinEmailCodeFlow.value === next) return;
+  devinEmailCodeFlow.value = next;
+  devinEmailCodeStep.value = 0;
+  devinEmailCodeEmailToken.value = '';
+  formData.devinEmailCodeOtp = '';
+  formData.devinEmailCodePassword = '';
+  formData.devinEmailCodeName = '';
 }
 
 // 邮箱密码模式的验证规则
@@ -636,8 +822,13 @@ const currentRules = computed(() => {
   if (addMode.value === 'devin_auth1') return devinAuth1Rules;
   if (addMode.value === 'devin_email_code') {
     if (devinEmailCodeStep.value === 0) return devinEmailCodeStep0Rules;
-    // Step 1 按 flow 分流：login 仅验证码，signup 额外要求新密码 + 姓名
-    return devinEmailCodeFlow.value === 'signup' ? devinEmailCodeStep1SignupRules : devinEmailCodeStep1Rules;
+    // Step 1 按 source + flow 分流：
+    //   - source=devin_native：仅验证码（Devin 原生不需密码/姓名）
+    //   - source=windsurf_side + flow=login：仅验证码
+    //   - source=windsurf_side + flow=signup：验证码 + 新密码 + 姓名
+    const needsSignupExtras =
+      devinEmailCodeSource.value === 'windsurf_side' && devinEmailCodeFlow.value === 'signup';
+    return needsSignupExtras ? devinEmailCodeStep1SignupRules : devinEmailCodeStep1Rules;
   }
   return devinRules;
 });
@@ -645,7 +836,8 @@ const currentRules = computed(() => {
 // 切换模式时重置表单
 function handleModeChange() {
   formRef.value?.resetFields();
-  // Devin 邮箱验证码模式专属状态重置
+  // Devin 邮箱验证码合并卡专属状态重置（source + step + token + flow + 表单字段）
+  devinEmailCodeSource.value = 'devin_native';
   devinEmailCodeStep.value = 0;
   devinEmailCodeEmailToken.value = '';
   devinEmailCodeFlow.value = 'login';
@@ -735,9 +927,16 @@ async function handleSubmit() {
         // Devin Auth1 Token 直接迁入
         await handleDevinAuth1Submit();
       } else if (addMode.value === 'devin_email_code') {
-        // Devin 邮箱验证码（两步流程）—— 按 step + flow 分派
+        // Devin 邮箱验证码合并卡—— 按 step + source + flow 三路分派：
+        //   step 0 统一发验证码（sendDevinEmailCode 内部按 source 选端口）
+        //   step 1：
+        //     - source=devin_native → completeDevinEmailCodeNativeRegister
+        //     - source=windsurf_side + flow=signup → completeDevinEmailCodeRegister
+        //     - source=windsurf_side + flow=login → completeDevinEmailCodeLogin
         if (devinEmailCodeStep.value === 0) {
           await sendDevinEmailCode();
+        } else if (devinEmailCodeSource.value === 'devin_native') {
+          await completeDevinEmailCodeNativeRegister();
         } else if (devinEmailCodeFlow.value === 'signup') {
           await completeDevinEmailCodeRegister();
         } else {
@@ -1134,6 +1333,9 @@ function escapeHtml(s: string): string {
  */
 async function switchToEmailCodeModeAndSend(flow: 'login' | 'signup' = 'login') {
   addMode.value = 'devin_email_code';
+  // smart 分派进入的场景都是 Windsurf 侧（sniff_login_method 只探测 windsurf.com 侧的登录方式），
+  // 合并卡默认 source='devin_native' 会走错端口，此处必须强制置为 'windsurf_side'
+  devinEmailCodeSource.value = 'windsurf_side';
   devinEmailCodeFlow.value = flow;
   devinEmailCodeStep.value = 0;
   devinEmailCodeEmailToken.value = '';
@@ -1148,10 +1350,13 @@ async function switchToEmailCodeModeAndSend(flow: 'login' | 'signup' = 'login') 
 }
 
 /**
- * Devin 邮箱验证码—— 第 1 步：调 /email/start 发送验证码
+ * Devin 邮箱验证码合并卡 —— 第 1 步：按 source 分派发验证码
  *
- * - login flow：`mode=login` —— 仅对已存在账号有效，服务端不会创建新账号
- * - signup flow：`mode=signup` —— 服务端向邮箱发送注册验证码，后续 `/email/complete` 时创建新账号
+ * - source=devin_native：走 `app.devin.ai/api/auth1/email/start(mode=signup)`
+ *   账号主归属 Devin；只有 signup，不用分 login/signup
+ * - source=windsurf_side：走 `windsurf.com/_devin-auth/email/start`。mode 按 flow 切：
+ *     * login —— 仅对已存在账号有效，服务端不会创建新账号
+ *     * signup —— 服务端向邮箱发送注册验证码，后续 `/email/complete` 时创建新账号
  *
  * 成功后更新 step=1，进入验证码输入屏。
  */
@@ -1162,6 +1367,25 @@ async function sendDevinEmailCode() {
     return;
   }
 
+  // 分支 1：Devin 原生—— app.devin.ai 端口，仅 signup
+  if (devinEmailCodeSource.value === 'devin_native') {
+    try {
+      const resp = await devinApi.nativeEmailStart(trimmedEmail, 'signup');
+      if (!resp || !resp.email_verification_token) {
+        ElMessage.error('后端未返回 email_verification_token，无法继续');
+        return;
+      }
+      devinEmailCodeEmailToken.value = resp.email_verification_token;
+      devinEmailCodeStep.value = 1;
+      ElMessage.success(`Devin 原生注册验证码已发送至 ${trimmedEmail}`);
+    } catch (e: any) {
+      const errMsg = String(e?.message || e || '');
+      ElMessage.error(`发送验证码失败：${errMsg}`);
+    }
+    return;
+  }
+
+  // 分支 2：Windsurf 侧—— windsurf.com/_devin-auth 端口，mode 按 flow 切
   const mode = devinEmailCodeFlow.value === 'signup' ? 'signup' : 'login';
   try {
     const resp = await devinApi.emailStart(trimmedEmail, mode, 'Windsurf');
@@ -1348,6 +1572,78 @@ async function completeDevinEmailCodeRegister() {
   }
 }
 
+/**
+ * Devin 邮箱验证码合并卡（source=devin_native）—— 第 2 步：提交验证码完成注册 + 桥接 + 落库
+ *
+ * 调用后端 `add_account_by_devin_native_register`：
+ * 1. `devin_app_email_complete(token, code, mode="signup")` → 得 auth1_token
+ * 2. `WindsurfPostAuth(auth1_token, org_id)` → 得 session_token
+ * 3. 落库为新账号（password 字段留空，因为 Devin 原生不收集密码）
+ *
+ * 复用 `devinEmailCodeEmailToken` / `formData.devinEmailCodeOtp` 统一状态，不再维护独立的 devinNative* 字段。
+ * 多组织场景复用 `promptOrgSelection` + `addAccountWithOrg`（与其他 Devin 注册流程一致）。
+ */
+async function completeDevinEmailCodeNativeRegister() {
+  const trimmedEmail = formData.email.trim();
+  const otp = formData.devinEmailCodeOtp.trim();
+  const trimmedNickname = formData.nickname.trim() || undefined;
+
+  if (!otp) {
+    ElMessage.error('请输入验证码');
+    return;
+  }
+  if (!devinEmailCodeEmailToken.value) {
+    ElMessage.error('会话状态异常，请返回上一步重新发送验证码');
+    return;
+  }
+
+  const result = await devinApi.addAccountByNativeRegister({
+    email: trimmedEmail,
+    emailVerificationToken: devinEmailCodeEmailToken.value,
+    code: otp,
+    nickname: trimmedNickname,
+    tags: formData.tags,
+    group: formData.group || '默认分组',
+  });
+
+  // 分支 1：多组织，需用户二次选择
+  if (result.requires_org_selection && result.auth1_token && result.orgs) {
+    const chosenOrg = await promptOrgSelection(result.orgs);
+    if (!chosenOrg) {
+      ElMessage.info('已取消多组织选择');
+      return;
+    }
+
+    // Devin 原生注册场景 password 始终留空（服务端不支持预设密码）
+    const confirmResult = await devinApi.addAccountWithOrg({
+      email: trimmedEmail,
+      auth1Token: result.auth1_token,
+      orgId: chosenOrg,
+      nickname: trimmedNickname,
+      tags: formData.tags,
+      group: formData.group || '默认分组',
+    });
+
+    if (confirmResult.success) {
+      ElMessage.success(`Devin 原生账号 ${trimmedEmail} 注册成功（已桥接 Windsurf）`);
+      await accountsStore.loadAccounts();
+      handleClose();
+    } else {
+      ElMessage.error(confirmResult.message || '组织选择后注册账号失败');
+    }
+    return;
+  }
+
+  // 分支 2：直接注册成功
+  if (result.success) {
+    ElMessage.success(`Devin 原生账号 ${result.email || trimmedEmail} 注册成功（已桥接 Windsurf）`);
+    await accountsStore.loadAccounts();
+    handleClose();
+  } else {
+    ElMessage.error(result.message || 'Devin 原生注册失败');
+  }
+}
+
 function handleClose() {
   uiStore.closeAddAccountDialog();
   formRef.value?.resetFields();
@@ -1365,7 +1661,8 @@ function handleClose() {
   formData.group = '默认分组';
   formData.tags = [];
   addMode.value = 'smart';
-  // Devin 邮箱验证码模式状态
+  // Devin 邮箱验证码合并卡状态重置
+  devinEmailCodeSource.value = 'devin_native';
   devinEmailCodeStep.value = 0;
   devinEmailCodeEmailToken.value = '';
   devinEmailCodeFlow.value = 'login';
