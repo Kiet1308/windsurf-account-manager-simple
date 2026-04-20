@@ -125,6 +125,16 @@
 
 ## 📜 版本历史
 
+### v1.7.4 (2026-04-20)
+- **新增 自动更新功能 (tauri-plugin-updater)**: 集成官方 updater + process 插件，应用启动后 3 秒静默检测 GitHub Releases 最新版本，发现新版时自动弹出更新对话框；支持下载进度实时展示、安装后一键重启、"跳过此版本"本地记忆、24 小时检测防抖
+- **新增 UpdateDialog.vue 独立更新对话框**: 显示当前版本 / 新版本 / 发布说明 / 下载进度 / 安装状态，支持"立即更新 / 跳过此版本 / 稍后提醒"
+- **新增 关于对话框"检查更新"按钮**: 版本号旁可手动触发检查（忽略 24h 防抖）；按钮文案随状态动态切换（检查中 / 立即更新 / 下载中 / 安装中 / 重启应用）
+- **新增 Pinia updater store** (`src/store/modules/updater.ts`): 统一管理更新检查、下载、安装、重启、版本跳过等状态与动作
+- **改造 GitHub Actions 构建流程** (`.github/workflows/build.yml`): 6 个构建 Job 注入 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 环境变量完成签名；Upload artifacts 扩展收集 `.msi.sig` / `.exe.sig` / `.app.tar.gz.sig` / `.AppImage.sig`；Release Job 新增"合并各平台签名生成 latest.json"步骤并上传至 Release
+- **新增 Tauri 配置**: `src-tauri/tauri.conf.json` 新增 `plugins.updater`（endpoints 指向 GitHub Releases latest.json、Windows 静默安装、minisign 公钥嵌入）与 `bundle.createUpdaterArtifacts: true`；`capabilities/default.json` 授权 `updater:default` + `process:default`
+- **新增 前端依赖**: `@tauri-apps/plugin-updater` + `@tauri-apps/plugin-process`
+- **影响范围**: 所有平台（Windows x64/arm64、macOS x64/arm64、Linux x64 AppImage）；Linux ARM64 因交叉编译限制不支持自动更新（既有限制未改动）
+
 ### v1.7.3 (2026-04-20)
 - **修复 Devin 刷新逻辑**: 补充关键字段回填、修正 product 参数大小写并完善批量刷新的 store 同步
 - 优化 Devin session_token 到期时间占位机制

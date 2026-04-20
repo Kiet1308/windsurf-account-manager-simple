@@ -125,6 +125,16 @@ A Windsurf multi-account management desktop application built with Tauri + Vue 3
 
 ## 📜 Version History
 
+### v1.7.4 (2026-04-20)
+- **Added Auto-Update Feature (tauri-plugin-updater)**: Integrated official updater + process plugins. On app startup (3s delay), silently checks the latest release on GitHub Releases and automatically pops up the update dialog when a new version is available. Supports real-time download progress, one-click restart after install, per-version "skip this version" memory, and 24-hour check debounce
+- **Added UpdateDialog.vue (standalone update dialog)**: Displays current version / new version / release notes / download progress / install status; supports "Install Now / Skip This Version / Remind Me Later"
+- **Added "Check for Updates" button in About dialog**: Next to version number, manually triggers update check (bypassing 24h debounce); button label reflects state dynamically (Checking / Install Now / Downloading / Installing / Restart)
+- **Added Pinia updater store** (`src/store/modules/updater.ts`): Unified management of update check, download, install, restart, and skip-version state & actions
+- **Updated GitHub Actions workflow** (`.github/workflows/build.yml`): Injected `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` env vars across all 6 build jobs for signing; Upload artifacts now also collects `.msi.sig` / `.exe.sig` / `.app.tar.gz.sig` / `.AppImage.sig`; Release job adds a new step to merge per-platform signatures into a unified `latest.json` and upload to the Release
+- **Added Tauri config**: `src-tauri/tauri.conf.json` now includes `plugins.updater` (endpoints pointing to GitHub Releases latest.json, Windows passive install mode, embedded minisign pubkey) and `bundle.createUpdaterArtifacts: true`; `capabilities/default.json` grants `updater:default` + `process:default`
+- **Added frontend dependencies**: `@tauri-apps/plugin-updater` + `@tauri-apps/plugin-process`
+- **Scope**: All platforms (Windows x64/arm64, macOS x64/arm64, Linux x64 AppImage); Linux ARM64 does not support auto-update due to pre-existing cross-compilation limitation (unchanged)
+
 ### v1.7.3 (2026-04-20)
 - **Fixed Devin Refresh Logic**: Added key field backfill, fixed product parameter case sensitivity, and improved batch refresh store synchronization
 - Optimized Devin session_token expiration placeholder mechanism
@@ -1139,6 +1149,7 @@ Windsurf Account Manager - Simple is a fully-featured Windsurf multi-account man
 - **v1.7.1**: Multi-client support (Windsurf and Windsurf - Next)
 - **v1.7.2**: Complete Devin account system support
 - **v1.7.3**: Devin refresh logic fix, key field backfill
+- **v1.7.4**: Auto-update integration (tauri-plugin-updater) with signed releases and unified latest.json
 
 ### Future Plans
 - [ ] Support Linux and macOS platforms

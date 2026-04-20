@@ -359,6 +359,59 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
+      # 从 README.md 提取当前版本的变更说明（"### v<VERSION> (...)" 块到下一个二级/三级标题之前），
+      # 作为 GitHub Release 正文 + latest.json 的 notes 字段。保持"单一真相源"：版本历史手写在 README，CI 自动同步。
+      - name: Extract release notes from README
+        id: extract_notes
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.get-version.outputs.version }}"
+
+          if [ ! -f README.md ]; then
+            echo "README.md not found, fallback to default notes."
+            echo "Release v$VERSION" > RELEASE_NOTES.md
+          else
+            awk -v ver="### v$VERSION" '
+              # 命中当前版本的三级标题，开始收集
+              index($0, ver) == 1 { flag = 1; next }
+              # 遇到下一个版本（### v...）或下一个二级标题（## ...），结束
+              flag && /^### v[0-9]/ { flag = 0 }
+              flag && /^## /        { flag = 0 }
+              flag { print }
+            ' README.md > RELEASE_NOTES.md
+
+            # 去除首尾空行
+            sed -i -e '/./,$!d' -e ':a;/^\s*$/{$d;N;ba' RELEASE_NOTES.md || true
+
+            if [ ! -s RELEASE_NOTES.md ]; then
+              echo "No section found for v$VERSION in README.md, fallback to default notes."
+              echo "Release v$VERSION" > RELEASE_NOTES.md
+            fi
+          fi
+
+          # 在正文前加一个标题（GitHub Release 正文展示时更友好）
+          {
+            echo "## 🎉 What's New in v$VERSION"
+            echo ""
+            cat RELEASE_NOTES.md
+            echo ""
+            echo "---"
+            echo ""
+            echo "### 📥 Downloads"
+            echo "- **Windows x64**: \`.msi\` / \`.exe\` (NSIS)"
+            echo "- **Windows ARM64**: \`.msi\` / \`.exe\` (NSIS)"
+            echo "- **macOS Intel**: \`.dmg\`"
+            echo "- **macOS Apple Silicon**: \`.dmg\`"
+            echo "- **Linux x64**: \`.deb\` / \`.rpm\` / \`.AppImage\`"
+            echo "- **Linux ARM64**: \`.deb\` / \`.rpm\`"
+            echo ""
+            echo "### 🔄 Auto-Update"
+            echo "Existing installations with auto-update support will be notified automatically via the built-in updater."
+          } > RELEASE_BODY.md
+
+          echo "=== RELEASE_BODY.md ==="
+          cat RELEASE_BODY.md
+
       # 合并各平台 .sig 签名文件，生成统一的 latest.json 供 tauri-plugin-updater 消费。
       # endpoint 指向 Releases latest 的 latest.json（见 tauri.conf.json plugins.updater.endpoints）。
       - name: Generate latest.json for updater
@@ -406,10 +459,14 @@ jobs:
               '$acc + {($k): {signature: $sig, url: $url}}')
           done
 
+          # notes 字段读取 RELEASE_NOTES.md（精简版，不含 Downloads/Auto-Update 尾块），
+          # 将在客户端 UpdateDialog 中通过 marked 渲染为 markdown。
+          NOTES="$(cat RELEASE_NOTES.md)"
+
           jq -n \
             --arg version "$VERSION" \
             --arg pub_date "$PUB_DATE" \
-            --arg notes "See release notes on GitHub." \
+            --arg notes "$NOTES" \
             --argjson platforms "$PLATFORMS" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
@@ -422,9 +479,13 @@ jobs:
         with:
           name: Windsurf Account Manager v${{ needs.get-version.outputs.version }}
           tag_name: ${{ needs.get-version.outputs.tag_name }}
-          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          # 自动发布，不留草稿；失败时用 release --edit 手动改
+          draft: false
           prerelease: false
-          generate_release_notes: true
+          # 使用提取好的 body 覆盖默认 notes（不再使用 generate_release_notes 避免追加 commit 流水）
+          body_path: RELEASE_BODY.md
+          generate_release_notes: false
+          fail_on_unmatched_files: false
           files: |
             artifacts/**/*.exe
             artifacts/**/*.exe.sig
