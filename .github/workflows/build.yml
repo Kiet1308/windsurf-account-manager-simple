@@ -359,9 +359,27 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
+      # actions/upload-artifact@v4 默认保留完整源路径，下载后文件位于
+      # artifacts/<arch>/src-tauri/target/<triple>/release/bundle/<fmt>/<file> 深层目录；
+      # 但后续 Disambiguate rename step 和 latest.json 的 collect 函数用的都是直接子目录
+      # pattern（非递归 glob），路径不匹配就会默默跳过，导致 platforms 为空 + macOS 同名
+      # 冲突从未被真实重命名。先把每个 <arch> 目录 flatten 到顶层，后续步骤即可按预期工作。
+      - name: Flatten artifact directory structure
+        run: |
+          set -euo pipefail
+          for dir in artifacts/*/; do
+            # 把所有深层文件移到 $dir 根下（mv -t 是 GNU coreutils 特性，Ubuntu runner 原生支持）
+            find "$dir" -mindepth 2 -type f -exec mv -t "$dir" {} +
+            # 清理 flatten 后遗留的空目录
+            find "$dir" -mindepth 1 -type d -empty -delete
+          done
+          echo "=== after flatten ==="
+          ls -R artifacts
+
       # macOS 两个 arch 的 .app.tar.gz / .sig 文件名 Tauri 默认不带 arch 后缀，
-      # 上传到同一 Release 时会因同名触发 softprops/action-gh-release 的 PATCH 路径并 404。
-      # 这里统一补上 _x64 / _aarch64 后缀，既解决上传冲突，也让 latest.json 的 URL 自然区分。
+      # 上传到同一 Release 时会因同名触发 softprops/action-gh-release 的 422 already_exists
+      # （或并发下的 404 race）。这里统一补上 _x64 / _aarch64 后缀，既解决上传冲突，也让
+      # latest.json 的 URL 自然区分两个 arch。
       - name: Disambiguate macOS artifacts (add arch suffix)
         run: |
           set -euo pipefail
