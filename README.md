@@ -133,6 +133,10 @@
 - **改造 GitHub Actions 构建流程** (`.github/workflows/build.yml`): 6 个构建 Job 注入 `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 环境变量完成签名；Upload artifacts 扩展收集 `.msi.sig` / `.exe.sig` / `.app.tar.gz.sig` / `.AppImage.sig`；Release Job 新增"合并各平台签名生成 latest.json"步骤并上传至 Release
 - **新增 Tauri 配置**: `src-tauri/tauri.conf.json` 新增 `plugins.updater`（endpoints 指向 GitHub Releases latest.json、Windows 静默安装、minisign 公钥嵌入）与 `bundle.createUpdaterArtifacts: true`；`capabilities/default.json` 授权 `updater:default` + `process:default`
 - **新增 前端依赖**: `@tauri-apps/plugin-updater` + `@tauri-apps/plugin-process`
+- **新增 Devin Auth1 Token 直接导入通道**: 新增后端命令 `add_account_by_devin_auth1_token`，用户粘贴浏览器 localStorage 的 `devin_auth1_token`（格式 `auth1_<52字符>`）即可一键迁入 Devin 账号。后端内部自动完成 `windsurf_post_auth` 换取 session_token → `GetCurrentUser` 反查 email / 配额 / api_key → 落库；相比 Session Token 迁入通道**额外保留 auth1_token**，到期可直接用 `refresh_devin_session` 续期。`AddAccountDialog` 新增「Devin Auth1 Token」Tab（与「Devin Session Token」并列），`BatchImportDialog` 同步新增 `devin_auth1_token` 批量导入模式（多组织自动选 primary org，不中断批量流程）
+- **修复 macOS / Linux 构建失败**: 删除 `src-tauri/tauri.conf.json` 中值为空串的 `windsurf-account-manager.exe.manifest` resource 条目——该 manifest 已通过 `build.rs::WindowsAttributes::app_manifest` 直接嵌入 Windows exe，无需作为运行时资源；原空值被 bundler 解析成目录路径触发 `Is a directory (os error 21)`
+- **对齐 Tauri NPM / Rust crate 版本**: 收紧 `Cargo.toml` 中 `tauri = "2.10"` / `tauri-build = "2.5"` / `tauri-plugin-updater = "2.10"` / `tauri-plugin-dialog = "2.7"` / `tauri-plugin-opener = "2.5"` / `tauri-plugin-process = "2.3"` 版本约束；同步刷新 `package.json` 中 `@tauri-apps/*` 依赖与 `package-lock.json`，消除 tauri-action 的版本一致性检查告警
+- **优化 GitHub Actions Release 流程** (`.github/workflows/build.yml`): Release Job 自动从 README.md 提取当前版本的版本历史条目作为 GitHub Release 描述与 `latest.json` 的 `notes` 字段；`draft: false` 构建完成后直接发布到 Release 页面，无需手动点"Publish release"
 - **影响范围**: 所有平台（Windows x64/arm64、macOS x64/arm64、Linux x64 AppImage）；Linux ARM64 因交叉编译限制不支持自动更新（既有限制未改动）
 
 ### v1.7.3 (2026-04-20)

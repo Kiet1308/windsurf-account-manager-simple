@@ -1183,11 +1183,11 @@ function handleBatchImport() {
 
 // 批量导入确认（从对话框接收数据）
 async function handleBatchImportConfirm(
-  accountsToImport: Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string }>,
+  accountsToImport: Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string; auth1Token?: string }>,
   autoLogin: boolean,
   group: string = '默认分组',
   tags: string[] = [],
-  mode: 'password' | 'refresh_token' | 'devin_session_token' = 'password',
+  mode: 'password' | 'refresh_token' | 'devin_session_token' | 'devin_auth1_token' = 'password',
   authProvider: 'firebase' | 'devin' | 'smart' = 'firebase'
 ) {
   // 获取并发设置
@@ -1197,6 +1197,12 @@ async function handleBatchImportConfirm(
   // === Devin Session Token 模式：逐条调 add_account_by_devin_session_token，不走 sniff/importTask ===
   if (mode === 'devin_session_token') {
     await handleDevinSessionTokenBatchImport(accountsToImport, group, tags, unlimitedConcurrent, concurrencyLimit);
+    return;
+  }
+
+  // === Devin Auth1 Token 模式：逐条调 add_account_by_devin_auth1_token（autoSelectPrimaryOrg=true） ===
+  if (mode === 'devin_auth1_token') {
+    await handleDevinAuth1TokenBatchImport(accountsToImport, group, tags, unlimitedConcurrent, concurrencyLimit);
     return;
   }
 
@@ -1541,6 +1547,107 @@ async function handleBatchImportConfirm(
     showBatchImportDialog.value = false;
     batchImportDialogRef.value?.resetImporting();
     ElMessage.error(`批量导入失败: ${error}`);
+  }
+}
+
+/**
+ * Devin Auth1 Token 批量导入辅助函数
+ *
+ * 逐条调 devinApi.addAccountByAuth1Token 并开启 autoSelectPrimaryOrg：
+ * 后端用 auth1_token 换取 session_token → 反查 GetCurrentUser 拿 email / 配额 → 落库。
+ * 多组织场景自动选择 primary org（批量场景不弹组织选择对话框，保证流程不被中断）。
+ *
+ * 与 handleDevinSessionTokenBatchImport 对称，区别在于落库后账号的 devin_auth1_token 字段已填充，
+ * 后续 session 到期可直接用 refresh_devin_session 刷新，无需重新获取 token。
+ */
+async function handleDevinAuth1TokenBatchImport(
+  items: Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string; auth1Token?: string }>,
+  group: string,
+  tags: string[],
+  unlimitedConcurrent: boolean,
+  concurrencyLimit: number,
+) {
+  let progressMsg = ElMessage({
+    message: unlimitedConcurrent
+      ? `正在全量并发导入 ${items.length} 个 Devin Auth1 Token...`
+      : `正在导入 ${items.length} 个 Devin Auth1 Token（并发${concurrencyLimit}）...`,
+    duration: 0,
+    icon: Loading,
+  });
+
+  const results: Array<{ email: string; success: boolean; error?: string }> = [];
+
+  const importTask = async (item: { remark: string; auth1Token?: string }) => {
+    if (!item.auth1Token) {
+      return { email: '(missing token)', success: false, error: '缺少 auth1Token' };
+    }
+    try {
+      const result = await devinApi.addAccountByAuth1Token({
+        auth1Token: item.auth1Token,
+        nickname: item.remark || undefined,
+        tags: tags.length > 0 ? [...tags] : [],
+        group: group,
+        autoSelectPrimaryOrg: true,
+      });
+      if (result.success) {
+        return { email: result.email || '(unknown)', success: true };
+      }
+      return {
+        email: result.email || '(unknown)',
+        success: false,
+        error: result.message || '导入失败',
+      };
+    } catch (e) {
+      return {
+        email: item.auth1Token.slice(0, 30) + '...',
+        success: false,
+        error: String(e),
+      };
+    }
+  };
+
+  try {
+    if (unlimitedConcurrent) {
+      const all = await Promise.all(items.map(importTask));
+      results.push(...all);
+    } else {
+      for (let i = 0; i < items.length; i += concurrencyLimit) {
+        const batch = items.slice(i, i + concurrencyLimit);
+        const batchResults = await Promise.all(batch.map(importTask));
+        results.push(...batchResults);
+        progressMsg.close();
+        progressMsg = ElMessage({
+          message: `导入进度: ${results.length}/${items.length}`,
+          duration: 0,
+          icon: Loading,
+        });
+      }
+    }
+
+    progressMsg.close();
+    showBatchImportDialog.value = false;
+    batchImportDialogRef.value?.resetImporting();
+
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success);
+    if (succeeded > 0) {
+      let msg = `成功通过 Auth1 Token 导入 ${succeeded} 个 Devin 账号`;
+      if (failed.length > 0) msg += `，失败 ${failed.length} 个`;
+      ElMessage.success({ message: msg, duration: 5000, showClose: true });
+      await accountsStore.loadAccounts();
+    } else {
+      const details = failed.slice(0, 3).map(f => `${f.email}（${f.error || '未知'}）`).join('\n');
+      ElMessage.error({
+        message: `没有成功导入任何账号\n${details}${failed.length > 3 ? '\n...' : ''}`,
+        duration: 5000,
+        showClose: true,
+      });
+    }
+  } catch (e) {
+    progressMsg.close();
+    showBatchImportDialog.value = false;
+    batchImportDialogRef.value?.resetImporting();
+    ElMessage.error(`批量导入失败: ${e}`);
   }
 }
 

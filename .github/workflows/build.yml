@@ -359,6 +359,37 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts
 
+      # macOS 两个 arch 的 .app.tar.gz / .sig 文件名 Tauri 默认不带 arch 后缀，
+      # 上传到同一 Release 时会因同名触发 softprops/action-gh-release 的 PATCH 路径并 404。
+      # 这里统一补上 _x64 / _aarch64 后缀，既解决上传冲突，也让 latest.json 的 URL 自然区分。
+      - name: Disambiguate macOS artifacts (add arch suffix)
+        run: |
+          set -euo pipefail
+          rename_if_exists() {
+            local src="$1"
+            local dst="$2"
+            if [ -f "$src" ]; then
+              mv "$src" "$dst"
+              echo "renamed: $src -> $dst"
+            fi
+          }
+          # macOS x64
+          rename_if_exists \
+            "artifacts/macos-x64/windsurf-account-manager.app.tar.gz" \
+            "artifacts/macos-x64/windsurf-account-manager_x64.app.tar.gz"
+          rename_if_exists \
+            "artifacts/macos-x64/windsurf-account-manager.app.tar.gz.sig" \
+            "artifacts/macos-x64/windsurf-account-manager_x64.app.tar.gz.sig"
+          # macOS ARM64
+          rename_if_exists \
+            "artifacts/macos-arm64/windsurf-account-manager.app.tar.gz" \
+            "artifacts/macos-arm64/windsurf-account-manager_aarch64.app.tar.gz"
+          rename_if_exists \
+            "artifacts/macos-arm64/windsurf-account-manager.app.tar.gz.sig" \
+            "artifacts/macos-arm64/windsurf-account-manager_aarch64.app.tar.gz.sig"
+          echo "=== after rename ==="
+          ls -la artifacts/macos-x64/ artifacts/macos-arm64/ || true
+
       # 从 README.md 提取当前版本的变更说明（"### v<VERSION> (...)" 块到下一个二级/三级标题之前），
       # 作为 GitHub Release 正文 + latest.json 的 notes 字段。保持"单一真相源"：版本历史手写在 README，CI 自动同步。
       - name: Extract release notes from README
@@ -442,8 +473,11 @@ jobs:
           }
 
           echo "Collecting platform signatures..."
-          collect "windows-x86_64"  "artifacts/windows-x64/*.msi.sig"
-          collect "windows-aarch64" "artifacts/windows-arm64/*.msi.sig"
+          # Windows 用 NSIS 的 -setup.exe.sig（Tauri v2 推荐 updater 走 NSIS，
+          # 支持静默升级且不触发 UAC；MSI 的 updater artifact 是 .msi.zip.sig，
+          # upload 阶段未收集，暂不启用）
+          collect "windows-x86_64"  "artifacts/windows-x64/*-setup.exe.sig"
+          collect "windows-aarch64" "artifacts/windows-arm64/*-setup.exe.sig"
           collect "darwin-x86_64"   "artifacts/macos-x64/*.app.tar.gz.sig"
           collect "darwin-aarch64"  "artifacts/macos-arm64/*.app.tar.gz.sig"
           collect "linux-x86_64"    "artifacts/linux-x64/*.AppImage.sig"

@@ -225,6 +225,7 @@ pub fn run() {
             commands::add_account_by_devin_with_org,
             commands::refresh_devin_session,
             commands::add_account_by_devin_session_token,
+            commands::add_account_by_devin_auth1_token,
 
             // 登录流派智能嗅探（方案 B：自动嗅探 + 统一入口）
             commands::devin_check_user_login_method,

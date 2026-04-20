@@ -637,6 +637,37 @@ export const devinApi = {
     });
   },
 
+  /**
+   * 通过已有的 Devin `auth1_token`（格式 `auth1_<52字符>`）直接导入账号
+   *
+   * 适用场景：用户从浏览器 localStorage 的 `devin_auth1_token` 键拷出的迁入路径。
+   * 与 `addAccountBySessionToken` 对称，但多保留 auth1_token，让后续 `refreshSession` 能正常工作。
+   *
+   * 后端内部：`windsurf_post_auth(auth1_token, org_id)` → `GetCurrentUser` 反查 email → 落库。
+   *
+   * 多组织处理：
+   * - `autoSelectPrimaryOrg` 省略或 false：返回 `requires_org_selection=true` + email/auth1_token/orgs，
+   *   前端需调 `addAccountWithOrg` 完成二次选 org
+   * - `autoSelectPrimaryOrg: true`（批量导入场景）：自动用 primary org 落库
+   */
+  async addAccountByAuth1Token(params: {
+    auth1Token: string;
+    orgId?: string;
+    nickname?: string;
+    tags: string[];
+    group?: string;
+    autoSelectPrimaryOrg?: boolean;
+  }): Promise<DevinLoginResult> {
+    return await invoke('add_account_by_devin_auth1_token', {
+      auth1Token: params.auth1Token,
+      orgId: params.orgId,
+      nickname: params.nickname,
+      tags: params.tags,
+      group: params.group,
+      autoSelectPrimaryOrg: params.autoSelectPrimaryOrg,
+    });
+  },
+
   // ========== 邮箱验证码（无密码登录） ==========
 
   /**

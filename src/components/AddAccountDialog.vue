@@ -144,6 +144,32 @@
         </el-form-item>
       </template>
 
+      <!-- Devin Auth1 Token 模式：直接粘贴 auth1_xxx 迁入（与 Session Token 对称，但多保留 auth1_token 使刷新可用） -->
+      <template v-else-if="addMode === 'devin_auth1'">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 18px;"
+        >
+          <template #title>
+            <span style="font-size: 12px;">
+              粘贴完整 <code>auth1_&lt;52 字符&gt;</code> 的 auth1_token（浏览器 localStorage 键名
+              <code>devin_auth1_token</code>），系统自动换取 session_token → 反查 email / 配额并落库。
+              <strong>相比 Session Token 多保留 auth1_token，后续可用「刷新」命令自动续期</strong>。
+            </span>
+          </template>
+        </el-alert>
+        <el-form-item label="Auth1 Token" prop="auth1Token">
+          <el-input
+            v-model="formData.auth1Token"
+            type="textarea"
+            :rows="3"
+            placeholder="请粘贴完整的 auth1_xxxxxxxx... 令牌"
+          />
+        </el-form-item>
+      </template>
+
       <!-- Devin 邮箱验证码模式：两步流程，按 flow 区分 login / signup -->
       <template v-else-if="addMode === 'devin_email_code'">
         <!-- 顶部说明：按 flow 动态文案 -->
@@ -367,7 +393,7 @@ const uiStore = useUIStore();
 
 const formRef = ref<FormInstance>();
 const loading = ref(false);
-const addMode = ref<'smart' | 'password' | 'refresh_token' | 'devin' | 'devin_session' | 'devin_email_code'>('smart');
+const addMode = ref<'smart' | 'password' | 'refresh_token' | 'devin' | 'devin_session' | 'devin_auth1' | 'devin_email_code'>('smart');
 
 // Devin 邮箱验证码登录的两步状态（mode === 'devin_email_code' 专属）
 // step 0：输入邮箱 + 发送验证码；step 1：输入验证码 + 完成登录/注册
@@ -384,6 +410,7 @@ const formData = reactive({
   password: '',
   refreshToken: '',
   sessionToken: '',
+  auth1Token: '',
   devinEmailCodeOtp: '',
   devinEmailCodePassword: '',
   devinEmailCodeName: '',
@@ -432,6 +459,14 @@ const modeOptions = [
     value: 'devin_session',
     title: 'Devin Session Token',
     desc: '粘贴 devin-session-token$... 直接迁入',
+    icon: Connection,
+    tag: '迁入',
+    tagType: 'warning' as const,
+  },
+  {
+    value: 'devin_auth1',
+    title: 'Devin Auth1 Token',
+    desc: '粘贴 auth1_... 直接迁入，支持刷新续期',
     icon: Connection,
     tag: '迁入',
     tagType: 'warning' as const,
@@ -567,12 +602,38 @@ const devinSessionRules: FormRules = {
   ]
 };
 
+// Devin Auth1 Token 模式的验证规则：auth1_ 前缀 + 基本长度约束
+const devinAuth1Rules: FormRules = {
+  auth1Token: [
+    { required: true, message: '请粘贴 Devin auth1_token', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        const trimmed = (value || '').trim();
+        if (!trimmed) return callback(new Error('请粘贴 Devin auth1_token'));
+        if (!trimmed.startsWith('auth1_')) {
+          return callback(new Error('auth1_token 必须以 auth1_ 前缀开头'));
+        }
+        // 官方格式：auth1_ + 52 字符；给一定宽容度
+        if (trimmed.length < 20) {
+          return callback(new Error(`auth1_token 长度异常（${trimmed.length} 字符），请确认完整粘贴`));
+        }
+        callback();
+      },
+      trigger: 'blur',
+    },
+  ],
+  nickname: [
+    { max: 20, message: '备注名称最多20个字符', trigger: 'blur' }
+  ]
+};
+
 // 根据模式选择验证规则
 const currentRules = computed(() => {
   // 智能模式复用邮箱密码规则（同样需要 email + password）
   if (addMode.value === 'smart' || addMode.value === 'password') return passwordRules;
   if (addMode.value === 'refresh_token') return refreshTokenRules;
   if (addMode.value === 'devin_session') return devinSessionRules;
+  if (addMode.value === 'devin_auth1') return devinAuth1Rules;
   if (addMode.value === 'devin_email_code') {
     if (devinEmailCodeStep.value === 0) return devinEmailCodeStep0Rules;
     // Step 1 按 flow 分流：login 仅验证码，signup 额外要求新密码 + 姓名
@@ -670,6 +731,9 @@ async function handleSubmit() {
       } else if (addMode.value === 'devin_session') {
         // Devin Session Token 直接迁入
         await handleDevinSessionSubmit();
+      } else if (addMode.value === 'devin_auth1') {
+        // Devin Auth1 Token 直接迁入
+        await handleDevinAuth1Submit();
       } else if (addMode.value === 'devin_email_code') {
         // Devin 邮箱验证码（两步流程）—— 按 step + flow 分派
         if (devinEmailCodeStep.value === 0) {
@@ -872,6 +936,73 @@ async function handleDevinSessionSubmit() {
     handleClose();
   } else {
     ElMessage.error(result.message || 'Session Token 迁入失败');
+  }
+}
+
+/**
+ * Devin Auth1 Token 直接迁入流程
+ *
+ * 与 handleDevinSessionSubmit 对称，但通过 auth1_token 换取 session_token 并额外保留 auth1_token，
+ * 后续 Devin session 到期可直接用 refreshSession 刷新，无需重新手动获取 token。
+ *
+ * 多组织场景：后端返回 { requires_org_selection, email, auth1_token, orgs }，
+ * 前端弹 promptOrgSelection → 调 addAccountWithOrg 完成落库（复用 handleDevinSubmit 的交互）。
+ */
+async function handleDevinAuth1Submit() {
+  const trimmedToken = formData.auth1Token.trim();
+  const trimmedNickname = formData.nickname.trim() || undefined;
+
+  if (!trimmedToken) {
+    ElMessage.error('Auth1 Token 不能为空');
+    return;
+  }
+  if (!trimmedToken.startsWith('auth1_')) {
+    ElMessage.error('auth1_token 必须以 auth1_ 前缀开头');
+    return;
+  }
+
+  ElMessage.info('正在用 auth1_token 换取 session 并反查账号信息……');
+  const result = await devinApi.addAccountByAuth1Token({
+    auth1Token: trimmedToken,
+    nickname: trimmedNickname,
+    tags: formData.tags,
+    group: formData.group || '默认分组',
+  });
+
+  // 分支 1：多组织，需用户二次选择
+  if (result.requires_org_selection && result.auth1_token && result.orgs && result.email) {
+    const chosenOrg = await promptOrgSelection(result.orgs);
+    if (!chosenOrg) {
+      ElMessage.info('已取消多组织选择');
+      return;
+    }
+
+    const confirmResult = await devinApi.addAccountWithOrg({
+      email: result.email,
+      auth1Token: result.auth1_token,
+      orgId: chosenOrg,
+      nickname: trimmedNickname,
+      tags: formData.tags,
+      group: formData.group || '默认分组',
+    });
+
+    if (confirmResult.success) {
+      ElMessage.success(`Devin 账号 ${result.email} 已通过 auth1_token 导入成功`);
+      await accountsStore.loadAccounts();
+      handleClose();
+    } else {
+      ElMessage.error(confirmResult.message || '组织选择后创建账号失败');
+    }
+    return;
+  }
+
+  // 分支 2：直接成功
+  if (result.success) {
+    ElMessage.success(`Devin 账号 ${result.email} 已通过 auth1_token 导入成功`);
+    await accountsStore.loadAccounts();
+    handleClose();
+  } else {
+    ElMessage.error(result.message || 'Auth1 Token 迁入失败');
   }
 }
 
@@ -1226,6 +1357,7 @@ function handleClose() {
   formData.password = '';
   formData.refreshToken = '';
   formData.sessionToken = '';
+  formData.auth1Token = '';
   formData.devinEmailCodeOtp = '';
   formData.devinEmailCodePassword = '';
   formData.devinEmailCodeName = '';

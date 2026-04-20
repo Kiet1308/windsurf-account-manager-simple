@@ -7,8 +7,8 @@
     @close="handleClose"
   >
     <div class="import-container">
-      <!-- 认证流派（devin_session_token 模式下无关，所以隐藏） -->
-      <div class="mode-section" v-if="importMode !== 'devin_session_token'">
+      <!-- 认证流派（Devin Session / Auth1 Token 模式下无关，所以隐藏） -->
+      <div class="mode-section" v-if="importMode !== 'devin_session_token' && importMode !== 'devin_auth1_token'">
         <span class="mode-label">认证流派：</span>
         <div class="mode-grid mode-grid--3col" role="radiogroup" aria-label="认证流派">
           <div
@@ -87,7 +87,7 @@
 
       <!-- 格式说明 -->
       <el-alert
-        :type="importMode === 'devin_session_token' ? 'warning' : (authProvider === 'firebase' ? 'info' : 'success')"
+        :type="(importMode === 'devin_session_token' || importMode === 'devin_auth1_token') ? 'warning' : (authProvider === 'firebase' ? 'info' : 'success')"
         :closable="false"
         show-icon
         style="margin-bottom: 16px;"
@@ -96,6 +96,12 @@
           <span v-if="importMode === 'devin_session_token'">
             [Devin Session Token] 每行一个 token，格式：<code>devin-session-token$... 备注(可选)</code>。
             系统逐条调 GetCurrentUser 反查 email / 配额 / api_key 并落库；无效或过期的 token 会归入导入失败。
+          </span>
+          <span v-else-if="importMode === 'devin_auth1_token'">
+            [Devin Auth1 Token] 每行一个 token，格式：<code>auth1_&lt;52字符&gt; 备注(可选)</code>。
+            系统逐条用 auth1_token 换取 session_token → 反查 email 并落库；
+            <strong>相比 Session Token 额外保留 auth1_token，后续支持刷新续期</strong>。
+            多组织账号会自动选择主组织完成导入。
           </span>
           <span v-else-if="importMode === 'password' && authProvider === 'smart'">
             [智能识别] 每行一个账号，格式：<code>邮箱 密码 备注(可选)</code>。
@@ -290,11 +296,11 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: boolean): void;
   (
     e: 'import',
-    accounts: Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string }>,
+    accounts: Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string; auth1Token?: string }>,
     autoLogin: boolean,
     group: string,
     tags: string[],
-    mode: 'password' | 'refresh_token' | 'devin_session_token',
+    mode: 'password' | 'refresh_token' | 'devin_session_token' | 'devin_auth1_token',
     authProvider: 'firebase' | 'devin' | 'smart',
   ): void;
 }>();
@@ -307,14 +313,14 @@ const visible = computed({
 });
 
 const inputText = ref('');
-const validAccounts = ref<Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string }>>([]);
+const validAccounts = ref<Array<{ email: string; password: string; remark: string; refreshToken?: string; sessionToken?: string; auth1Token?: string }>>([]);
 const invalidLines = ref<number[]>([]);
 const autoLogin = ref(true);
 const importing = ref(false);
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const selectedGroup = ref<string>('');
 const selectedTags = ref<string[]>([]);
-const importMode = ref<'password' | 'refresh_token' | 'devin_session_token'>('password');
+const importMode = ref<'password' | 'refresh_token' | 'devin_session_token' | 'devin_auth1_token'>('password');
 /// 认证流派：
 /// - `smart`（默认，推荐）：逐行嗅探 Firebase / Devin 自动分派到对应命令
 /// - `firebase`：手动强制走原有 add_account + login_account
@@ -365,11 +371,12 @@ const authProviderOptions = [
 ];
 
 /**
- * 导入模式卡片选项（3 项，按 authProvider 动态 disabled）
+ * 导入模式卡片选项（4 项，按 authProvider 动态 disabled）
  *
  * - password：邮箱 + 密码 + 可选备注
  * - refresh_token：Firebase refresh_token；只在 authProvider === 'firebase' 时可用
  * - devin_session_token：devin-session-token$... 迁入
+ * - devin_auth1_token：auth1_... 迁入（多保留 auth1_token，支持刷新续期）
  */
 const importModeOptions = computed(() => [
   {
@@ -407,6 +414,16 @@ const importModeOptions = computed(() => [
     disabled: false,
     disabledReason: '',
   },
+  {
+    value: 'devin_auth1_token' as const,
+    title: 'Devin Auth1 Token',
+    desc: '粘贴 auth1_... 直接迁入，多组织自动选主组织',
+    icon: Connection,
+    tag: '迁入',
+    tagType: 'warning' as const,
+    disabled: false,
+    disabledReason: '',
+  },
 ]);
 
 /**
@@ -422,7 +439,7 @@ function selectAuthProvider(value: 'smart' | 'firebase' | 'devin') {
  * 切换导入模式：等价原 v-model + @change="handleModeChange"。
  * disabled 项已在模板层拦截，本函数只处理合法切换。
  */
-function selectImportMode(value: 'password' | 'refresh_token' | 'devin_session_token') {
+function selectImportMode(value: 'password' | 'refresh_token' | 'devin_session_token' | 'devin_auth1_token') {
   if (importMode.value === value) return;
   importMode.value = value;
   handleModeChange();
@@ -434,6 +451,7 @@ const concurrencyLimit = computed(() => settingsStore.settings?.concurrent_limit
 // 按当前模式生成输入区的标题与占位符
 const sectionTitle = computed(() => {
   if (importMode.value === 'devin_session_token') return 'Devin Session Token 列表';
+  if (importMode.value === 'devin_auth1_token') return 'Devin Auth1 Token 列表';
   return importMode.value === 'password' ? '账号数据' : 'Refresh Token 列表';
 });
 const inputPlaceholder = computed(() => {
@@ -442,6 +460,9 @@ const inputPlaceholder = computed(() => {
   }
   if (importMode.value === 'refresh_token') {
     return 'AMf-vBx...长token... 测试账号1\nAMf-vBy...长token...\nAMf-vBz...长token... 备注信息';
+  }
+  if (importMode.value === 'devin_auth1_token') {
+    return 'auth1_uzq3g3s7leh774zhbwdlnbx7wotroz2srxeck53dujxa3bdje7yq 测试账号1\nauth1_xxxxxxxx...\nauth1_yyyyyyyy... 备注信息';
   }
   // devin_session_token
   return 'devin-session-token$eyJhbGciOi... 测试账号1\ndevin-session-token$eyJhbGciOi...\ndevin-session-token$eyJhbGciOi... 备注信息';
@@ -506,6 +527,22 @@ function parseAccounts() {
           password: '',
           remark: remarkParts.join(' ') || '',
           sessionToken: token,
+        });
+      } else {
+        invalidLines.value.push(index + 1);
+      }
+    });
+  } else if (importMode.value === 'devin_auth1_token') {
+    // Devin Auth1 Token 模式：首个非空白段为 auth1_token，必须以 auth1_ 开头且长度合理
+    lines.forEach((line, index) => {
+      const parts = splitLine(line);
+      if (parts.length >= 1 && parts[0].startsWith('auth1_') && parts[0].length >= 20) {
+        const [token, ...remarkParts] = parts;
+        validAccounts.value.push({
+          email: `Auth1 #${index + 1}`, // 实际 email 由后端反查填写；占位用于预览表格
+          password: '',
+          remark: remarkParts.join(' ') || '',
+          auth1Token: token,
         });
       } else {
         invalidLines.value.push(index + 1);

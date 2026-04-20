@@ -7,6 +7,7 @@
 //! - `add_account_by_devin_login(...)` — 完整流程：登录 + 建账号（主流程）
 //! - `devin_select_org(account_id, org_id)` — 多组织场景下的二次选择
 //! - `refresh_devin_session(id)` — 用 auth1_token 重新换取 session_token
+//! - `add_account_by_devin_auth1_token(...)` — 通过 auth1_token 直接迁入账号（与 session_token 迁入对称）
 
 use crate::commands::api_commands::devin_session_pseudo_expires_at;
 use crate::models::{Account, OperationLog, OperationStatus, OperationType};
@@ -771,6 +772,196 @@ pub(crate) async fn enrich_account_with_user_info(account: &mut Account, session
         return;
     };
     apply_user_info_to_account(account, user_info);
+}
+
+// ==================== Devin auth1_token 迁入 ====================
+
+/// 通过已有的 Devin `auth1_token` 直接导入账号
+///
+/// 适用场景：用户从浏览器 localStorage 拷出 `devin_auth1_token`（格式 `auth1_<52 字符>`）的迁入路径。
+/// 与 `add_account_by_devin_session_token` 对称，但多保留 auth1_token，
+/// 使未来 `refresh_devin_session` 能正常刷新 session。
+///
+/// 行为：
+/// 1. `windsurf_post_auth(auth1_token, org_id.unwrap_or(""))` 换取 session_token + orgs
+/// 2. 用 session_token 调 `GetCurrentUser` 反查 email / api_key / 套餐 / 配额
+/// 3. 分支：
+///    - `orgs > 1` 且未指定 `org_id` 且 `auto_select_primary_org != true`：
+///      返回 `{ requires_org_selection: true, email, auth1_token, orgs }`，由前端引导用户选组织后
+///      再调 `add_account_by_devin_with_org(email, auth1_token, chosen_org_id, ...)` 完成落库
+///    - 单组织 / 已指定 org_id / 批量自动选 primary：直接落库
+///
+/// # Arguments
+/// * `auth1_token` - 完整的 `auth1_<52字符>` 令牌
+/// * `org_id` - 可选，指定要加入的组织 ID；为空时后端用用户的 primary org
+/// * `nickname` - 可选备注名；留空时用反查到的 email 前缀
+/// * `tags` - 标签列表
+/// * `group` - 分组（可选）
+/// * `auto_select_primary_org` - 可选（默认 false）；批量导入场景传 true，多组织时直接用 primary_org 落库而非返回选择需求
+#[tauri::command]
+pub async fn add_account_by_devin_auth1_token(
+    auth1_token: String,
+    org_id: Option<String>,
+    nickname: Option<String>,
+    tags: Vec<String>,
+    group: Option<String>,
+    auto_select_primary_org: Option<bool>,
+    store: State<'_, Arc<DataStore>>,
+) -> Result<serde_json::Value, String> {
+    let token_trimmed = auth1_token.trim().to_string();
+    if !token_trimmed.starts_with("auth1_") {
+        return Err("auth1_token 必须以 `auth1_` 前缀开头，当前输入无效".to_string());
+    }
+    // auth1_ (6) + 52 字符 = 58；留一点宽容度以防官方后续调整
+    if token_trimmed.len() < 20 {
+        return Err(format!(
+            "auth1_token 长度异常（{} 字符），请确认完整粘贴",
+            token_trimmed.len()
+        ));
+    }
+
+    let auth = DevinAuthService::new();
+    let user_specified_org = org_id
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let auto_pick = auto_select_primary_org.unwrap_or(false);
+
+    // Step 1: 用 auth1_token 换取 session_token
+    let post_auth = auth
+        .windsurf_post_auth(&token_trimmed, &user_specified_org)
+        .await
+        .map_err(|e| format!("auth1_token 无效或已过期：{}", e))?;
+
+    let session_token = post_auth.session_token.clone();
+    // 服务端若在响应中轮换了 auth1_token，以新值为准；否则沿用用户输入
+    let effective_auth1_token = post_auth
+        .auth1_token
+        .clone()
+        .unwrap_or_else(|| token_trimmed.clone());
+
+    // Step 2: 反查 GetCurrentUser（构造完整的 Devin AuthContext，确保服务端所需头部齐全）
+    let ctx = crate::services::AuthContext {
+        token: session_token.clone(),
+        devin: Some(crate::services::DevinAuthContext {
+            account_id: post_auth.account_id.clone(),
+            auth1_token: Some(effective_auth1_token.clone()),
+            primary_org_id: post_auth.primary_org_id.clone(),
+        }),
+    };
+
+    let windsurf_service = WindsurfService::new();
+    let user_info_result = windsurf_service
+        .get_current_user(&ctx)
+        .await
+        .map_err(|e| format!("反查账号信息失败（auth1_token 可能已失效）：{}", e))?;
+
+    if !user_info_result
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
+        let msg = user_info_result
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("未知错误");
+        return Err(format!("反查账号信息失败：{}", msg));
+    }
+
+    let user_info = user_info_result
+        .get("user_info")
+        .ok_or_else(|| "GetCurrentUser 响应缺少 user_info 字段".to_string())?;
+
+    let email = user_info
+        .get("user")
+        .and_then(|u| u.get("email"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| "GetCurrentUser 响应未找到 email，无法建立账号".to_string())?
+        .to_string();
+
+    // Step 3: 多组织分支 — 未指定 org_id 且未开启自动选主 org 时，交给前端二次决策
+    if user_specified_org.is_empty() && !auto_pick && post_auth.orgs.len() > 1 {
+        return Ok(json!({
+            "success": false,
+            "requires_org_selection": true,
+            "auth1_token": effective_auth1_token,
+            "orgs": post_auth.orgs,
+            "email": email,
+            "message": "检测到多个组织，请选择一个继续"
+        }));
+    }
+
+    // Step 4: 落库 —— 已存在检查（邮箱不区分大小写）
+    let existing = store.get_all_accounts().await.map_err(|e| e.to_string())?;
+    if existing
+        .iter()
+        .any(|acc| acc.email.to_lowercase() == email.to_lowercase())
+    {
+        return Err(format!("账号 {} 已存在", email));
+    }
+
+    let final_nickname = nickname
+        .clone()
+        .and_then(|s| {
+            let trimmed = s.trim().to_string();
+            if trimmed.is_empty() { None } else { Some(trimmed) }
+        })
+        .unwrap_or_else(|| email.split('@').next().unwrap_or(&email).to_string());
+
+    // auth1_token 迁入场景无原始密码，password 字段留空
+    let mut account = store
+        .add_account(email.clone(), String::new(), final_nickname)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    account.tags = tags;
+    account.group = group;
+    account.status = crate::models::account::AccountStatus::Active;
+    account.last_login_at = Some(chrono::Utc::now());
+    account.token = Some(session_token);
+    account.token_expires_at = Some(devin_session_pseudo_expires_at());
+    account.auth_provider = Some("devin".to_string());
+
+    // Devin 扩展字段齐全（区别于 session_token 迁入路径）
+    account.devin_auth1_token = Some(effective_auth1_token);
+    account.devin_account_id = post_auth.account_id.clone();
+    account.devin_primary_org_id = post_auth.primary_org_id.clone().or_else(|| {
+        if !user_specified_org.is_empty() {
+            Some(user_specified_org.clone())
+        } else {
+            post_auth.orgs.first().map(|o| o.id.clone())
+        }
+    });
+
+    // 复用已拿到的 user_info 回填配额 / 套餐 / api_key 等，避免重复拉取
+    apply_user_info_to_account(&mut account, user_info);
+
+    store
+        .update_account(account.clone())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let log = OperationLog::new(
+        OperationType::AddAccount,
+        OperationStatus::Success,
+        format!("通过 Devin auth1_token 添加账号: {}", email),
+    )
+    .with_account(account.id, email.clone());
+    let _ = store.add_log(log).await;
+
+    Ok(json!({
+        "success": true,
+        "requires_org_selection": false,
+        "account": account,
+        "email": email,
+        "plan_name": account.plan_name,
+        "used_quota": account.used_quota,
+        "total_quota": account.total_quota,
+        "devin_account_id": account.devin_account_id,
+        "primary_org_id": account.devin_primary_org_id,
+    }))
 }
 
 /// 从 `DevinLoginResult` 持久化一个新账号
