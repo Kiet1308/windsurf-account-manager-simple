@@ -6,7 +6,7 @@
 
 ## 📦 项目信息
 
-- **当前版本**: 1.7.5
+- **当前版本**: 1.7.6
 - **许可证**: AGPL-3.0
 - **开发语言**: Rust + TypeScript
 - **支持平台**: Windows 10/11
@@ -124,6 +124,14 @@
 ---
 
 ## 📜 版本历史
+
+### v1.7.6 (2026-04-21)
+- **移植「API密钥」+「Provider Key」两个账号信息 Tab 到 simple 端**：`AccountInfoDialog.vue` 在「Firebase」tab 之后新增「API密钥」（含密钥生成 / 删除 / 复制 / 迁移 API Key / 模型排行榜查询 4 子区块）和「Provider Key」（第三方 AI 服务商密钥增删查，OpenAI / Anthropic / Gemini / XAI / OpenRouter / Groq / Fireworks / Cerebras / Together AI / Azure 等 13 种 Provider）两个 tab；用户详情 / 本地信息 / Firebase tab 同步补齐 `name` 属性 + `activeInfoTab` + `onInfoTabChange` 实现切到该 tab 自动加载数据；新增「新密钥已生成」和「添加 Provider Key」两个子对话框，以及 340+ 行 CSS（含暗色模式适配）
+- **Devin 账号「API密钥」tab 顶部稳定展示当前 session_token**：当前账号 `auth_provider === 'devin'` 时，「API密钥」tab header 之后渲染一个稳定区块，直接读取本地 `account.token`（后端存储时已带 `devin-session-token$` 前缀，前端零拼接）+ 复制按钮；绿色主题与 Firebase 的 sk-ws-01 风格区分。`AccountInfoDialog.vue` 引入 `useAccountsStore` + 新增 `currentAccount` / `isDevinAccount` / `devinSessionApiKey` 3 个 computed，零新增后端调用（纯前端从 Pinia 缓存读）。Firebase 账号该区块不渲染，保留原有「手动点生成新密钥」流程不变
+- **后端新增 10 个 Tauri 命令 + 12 个 service 方法**：`api_commands.rs` 新增 `get_api_key_summary` / `delete_api_key` / `register_user_api_key` / `get_set_user_api_provider_keys` / `set_user_api_provider_key` / `delete_user_api_provider_key` / `migrate_api_key` / `get_primary_api_key_for_devs` / `get_global_leaderboard_api_key` / `get_leaderboard`；`windsurf_service.rs` 新增 `register_user`（Firebase ID Token 经 RegisterUser 生成 sk-ws-01 格式 API Key）、`provider_id_to_name` / `provider_name_to_id`（33 种 Provider ID 双向映射）、`parse_leaderboard_result`（BigQueryResult.leaderboard_result.model_stats 解析）与对应的 Windsurf SeatManagement / UserAnalytics gRPC 调用；`lib.rs` 按功能分组注册新命令。复用 simple 端已有的 `encode_string_field` / `encode_varint` / `proto_parser::ProtobufParser` / `ensure_valid_token` / `AuthContext::from_account`，零新增 helper
+- **移植「检查Pro试用资格」功能到 simple 端**：`WindsurfService::check_pro_trial_eligibility` + `parse_is_eligible_strict` + `read_varint`严格按 protobuf wire format 解析 `CheckProTrialEligibility` 响应，结合 Content-Type 校验 fail-fast，避免「过期但结构合法的 Firebase ID Token 被后端误判 is_eligible=true」的风险；前端先调 `get_account_valid_token` 强制刷新 token 再调检查，合格时自动添加「试用资格」标签（色值 `#E6A23C`），不合格时自动清理历史标签保持数据一致。「获取试用链接」按钮后新增「检查Pro试用资格」按钮（Trophy 图标，info 色 plain）
+- **调整两个项目 AccountCard.vue 按钮布局**：把「转换登录方式」按钮从第二排末尾（一键切号之后）移到第一排「账号信息」按钮之后，与「删除账号」等高频管理操作同行排布，Tooltip 依据 `auth_provider` 动态显示 `Firebase→Devin` / `Devin→Firebase`
+- **影响范围**：simple 端账号信息对话框（3 tabs → 5 tabs）、AccountCard 操作第一排按钮（新增转换登录 + 检查Pro试用）、后端 Tauri 命令激活从 38 个 → 48 个。主项目同步调整按钮位置，两个项目 UI 交互模式对齐
 
 ### v1.7.5 (2026-04-20)
 - **新增 Firebase ↔ Devin 账号登录方式互转**：针对官方将部分老 Firebase 账号迁移到 Devin 体系（密码未变）导致本地 refresh_token 刷新失败的场景，新增后端双命令 `convert_account_to_devin` / `convert_account_to_firebase`，复用账号已存明文密码走目标体系的官方登录接口完成原子切换；账号卡操作第二排末尾加「转换登录方式」按钮，tooltip 按当前 `auth_provider` 动态切换（`Firebase→Devin` / `Devin→Firebase`）；Firebase→Devin 多组织场景内联 `ElMessageBox + h()` 渲染 radio list 让用户选 `org_id` 后二次提交。设计要点：幂等（目标体系=当前体系时直接 `already_converted=true` 无网络请求）；原子性（网络失败本地字段零改动）；切换成功自动调 GetCurrentUser + GetPlanStatus 补齐配额字段
