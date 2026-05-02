@@ -1623,22 +1623,12 @@ async function handleTurnstileSuccess(turnstileToken: string) {
     
     // 如果启用了自动打开，使用增强的API
     if (autoOpen) {
-      // 从store中获取最新的账号数据，确保token是最新的
-      const latestAccount = accountsStore.accounts.find(a => a.id === props.account.id);
-      const account = latestAccount || props.account;
-      
-      if (!account.token) {
-        ElMessage.warning('请先刷新Token后再试');
-        isGettingTrialLink.value = false;
-        return;
-      }
-      
-      // 使用增强的支付API
+      // 使用增强的支付 API（后端自行获取 token + 构造正确 AuthContext，支持 Firebase/Devin）
       const { getTrialPaymentLink, autoFillPaymentForm } = await import('@/utils/cardGenerator');
       
       const result = await getTrialPaymentLink(
-        account.nickname || account.email,
-        account.token,
+        props.account.id,
+        props.account.nickname || props.account.email,
         true, // 自动打开窗口
         teamsTier,
         paymentPeriod,
@@ -1805,16 +1795,9 @@ async function handleCheckProTrial() {
 
   isCheckingProTrial.value = true;
   try {
-    // Step 1: 强制拿到经过 ensure_valid_token 刷新后的有效 token
-    const tokenResult = await invoke('get_account_valid_token', { id: props.account.id }) as any;
-    if (!tokenResult?.success || !tokenResult?.token) {
-      ElMessage.error('Token 已失效且无法刷新，请重新登录账号后再试');
-      return;
-    }
-
-    // Step 2: 用新 token 请求后端
+    // 后端自行获取 token + 构造正确 AuthContext（支持 Firebase/Devin）
     const result = await invoke('check_pro_trial_eligibility', {
-      authToken: tokenResult.token
+      id: props.account.id
     }) as any;
 
     if (result.success) {

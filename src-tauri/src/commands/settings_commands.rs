@@ -106,7 +106,9 @@ pub async fn get_stats(
     store: State<'_, Arc<DataStore>>,
 ) -> Result<serde_json::Value, String> {
     let config = store.config.read().await;
-    let accounts = &config.accounts;
+    // v1.7.8 方案 B：从 SQLite 读取账号数据（config.accounts 迁移后已清空）
+    let all_accounts = store.account_store.get_all_accounts().unwrap_or_default();
+    let accounts = &all_accounts;
     let logs = &config.logs;
     
     // 统计成功和失败的操作

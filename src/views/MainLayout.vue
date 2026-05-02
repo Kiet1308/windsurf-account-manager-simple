@@ -182,7 +182,7 @@
               type="primary"
               :icon="Trophy"
               circle
-              @click="showBatchUpdatePlanDialog = true"
+              @click="openBatchUpdatePlanDialog"
             />
           </el-tooltip>
           
@@ -231,7 +231,7 @@
             <el-button
               :icon="Select"
               circle
-              :type="accountsStore.selectedAccounts.size === accountsStore.filteredAccounts.length && accountsStore.filteredAccounts.length > 0 ? 'primary' : 'default'"
+              :type="isAllSelected ? 'primary' : 'default'"
               @click="toggleSelectAll"
             />
           </el-tooltip>
@@ -465,7 +465,7 @@
     <BatchUpdatePlanDialog 
       v-model="showBatchUpdatePlanDialog"
       :selected-account-ids="Array.from(accountsStore.selectedAccounts)"
-      :accounts="accountsStore.accounts"
+      :accounts="batchPlanAccounts"
       @success="accountsStore.loadAccounts()"
     />
     
@@ -624,7 +624,6 @@ import {
 import { useAccountsStore, useSettingsStore, useUIStore } from '@/store';
 import { apiService, settingsApi, accountApi, devinApi } from '@/api';
 import type { Account } from '@/types';
-import dayjs from 'dayjs';
 import AccountCard from '@/components/AccountCard.vue';
 import AddAccountDialog from '@/components/AddAccountDialog.vue';
 import EditAccountDialog from '@/components/EditAccountDialog.vue';
@@ -654,6 +653,7 @@ const currentWindsurfEmail = ref<string>('');
 const windsurfVersion = ref<string>('');
 const windsurfClientDisplayName = ref<string>('Windsurf');
 const showBatchUpdatePlanDialog = ref(false);
+const batchPlanAccounts = ref<Account[]>([]);
 const showAbout = ref(false);
 const showUpdateDialog = ref(false);
 const updaterStore = useUpdaterStore();
@@ -819,13 +819,24 @@ const hasActiveFilter = computed(() => {
 
 const sidebarWidth = computed(() => uiStore.sidebarCollapsed ? '64px' : '240px');
 
+// 全选状态：在分组视图中用该分组账号数判断，无分组时用总数
+const isAllSelected = computed(() => {
+  const size = accountsStore.selectedAccounts.size;
+  if (size === 0) return false;
+  const group = accountsStore.currentFilter.group;
+  const target = group
+    ? (accountsStore.aggregates.group_counts[group] ?? 0)
+    : accountsStore.aggregates.total_count;
+  return size >= target && target > 0;
+});
+
 function setActiveMenu(menu: string) {
   activeMenu.value = menu;
   accountsStore.clearFilter();
 }
 
 function getGroupAccountCount(group: string): number {
-  return accountsStore.accounts.filter(acc => acc.group === group).length;
+  return accountsStore.aggregates.group_counts[group] ?? 0;
 }
 
 function filterByGroup(group: string) {
@@ -908,12 +919,12 @@ async function refreshAccounts() {
   });
   
   try {
-    // 批量刷新所有账号（使用优化的批量 API）
-    if (accountsStore.accounts.length > 0) {
+    // 批量刷新所有账号（v1.7.8 方案 B：从后端获取全部 ID，不遍历当前页数组）
+    const allIds = await accountApi.getAllAccountIds();
+    if (allIds.length > 0) {
       loading.close();
       
-      const totalCount = accountsStore.accounts.length;
-      const allIds = accountsStore.accounts.map(a => a.id);
+      const totalCount = allIds.length;
       
       const progressLoading = ElMessage({
         message: `正在批量刷新 ${totalCount} 个账号...`,
@@ -929,37 +940,8 @@ async function refreshAccounts() {
       const successCount = result.success_count || 0;
       const failedCount = totalCount - successCount;
       
-      // 使用后端返回的完整数据更新本地 store（无需重新加载页面）
-      if (result.results) {
-        for (const item of result.results) {
-          const idx = accountsStore.accounts.findIndex(a => a.id === item.id);
-          if (idx === -1) continue;
-          
-          if (item.success && item.data) {
-            const account = accountsStore.accounts[idx];
-            if (item.data.plan_name) account.plan_name = item.data.plan_name;
-            if (item.data.used_quota !== undefined) account.used_quota = item.data.used_quota;
-            if (item.data.total_quota !== undefined) account.total_quota = item.data.total_quota;
-            if (item.data.expires_at) account.token_expires_at = item.data.expires_at;
-            if (item.data.windsurf_api_key) account.windsurf_api_key = item.data.windsurf_api_key;
-            if (item.data.is_disabled !== undefined) account.is_disabled = item.data.is_disabled;
-            if (item.data.subscription_active !== undefined) account.subscription_active = item.data.subscription_active;
-            if (item.data.subscription_expires_at && typeof item.data.subscription_expires_at === 'number' && item.data.subscription_expires_at > 0) {
-              account.subscription_expires_at = dayjs.unix(item.data.subscription_expires_at).toISOString();
-            }
-            if (item.data.last_quota_update) account.last_quota_update = item.data.last_quota_update;
-            if (item.data.billing_strategy !== undefined) account.billing_strategy = item.data.billing_strategy;
-            if (item.data.daily_quota_remaining_percent !== undefined) account.daily_quota_remaining_percent = item.data.daily_quota_remaining_percent;
-            if (item.data.weekly_quota_remaining_percent !== undefined) account.weekly_quota_remaining_percent = item.data.weekly_quota_remaining_percent;
-            if (item.data.daily_quota_reset_at_unix !== undefined) account.daily_quota_reset_at_unix = item.data.daily_quota_reset_at_unix;
-            if (item.data.weekly_quota_reset_at_unix !== undefined) account.weekly_quota_reset_at_unix = item.data.weekly_quota_reset_at_unix;
-            if (item.data.overage_balance_micros !== undefined) account.overage_balance_micros = item.data.overage_balance_micros;
-            account.status = 'active';
-          } else {
-            accountsStore.accounts[idx].status = 'error';
-          }
-        }
-      }
+      // v1.7.8：后端已将刷新结果写入 SQLite，前端刷新当前页即可
+      await Promise.all([accountsStore.fetchPage(), accountsStore.refreshAggregates()]);
       
       // 显示详细的刷新结果
       if (failedCount === 0) {
@@ -971,8 +953,7 @@ async function refreshAccounts() {
       } else {
         const failedItems = result.results?.filter((r: any) => !r.success) || [];
         const failedDetails = failedItems.slice(0, 3).map((item: any) => {
-          const account = accountsStore.accounts.find(a => a.id === item.id);
-          return `  • ${account?.email || item.id}: ${item.error || '未知错误'}`;
+          return `  • ${item.id}: ${item.error || '未知错误'}`;
         }).join('\n');
         const moreFailures = failedItems.length > 3 ? `\n  ... 还有 ${failedItems.length - 3} 个失败` : '';
         
@@ -1139,16 +1120,19 @@ watch(() => uiStore.showBillingDialog, (show) => {
   }
 });
 
-// 全选/取消全选
-function toggleSelectAll() {
-  if (accountsStore.selectedAccounts.size === accountsStore.filteredAccounts.length && accountsStore.filteredAccounts.length > 0) {
-    // 当前是全选状态，取消全选
+// 全选/取消全选（v1.7.8：在分组视图中只选当前分组，无分组时选全部）
+async function toggleSelectAll() {
+  const group = accountsStore.currentFilter.group;
+  const targetCount = group
+    ? (accountsStore.aggregates.group_counts[group] ?? 0)
+    : accountsStore.aggregates.total_count;
+
+  if (accountsStore.selectedAccounts.size > 0 && accountsStore.selectedAccounts.size >= targetCount) {
     accountsStore.clearSelection();
   } else {
-    // 选择所有账号
-    accountsStore.filteredAccounts.forEach(account => {
-      accountsStore.selectedAccounts.add(account.id);
-    });
+    await accountsStore.selectAll();
+    const label = group ? `"${group}" 分组` : '全部';
+    ElMessage.success(`已全选${label} ${accountsStore.selectedAccounts.size} 个账号`);
   }
 }
 
@@ -1190,7 +1174,8 @@ async function handleBatchImportConfirm(
   group: string = '默认分组',
   tags: string[] = [],
   mode: 'password' | 'refresh_token' | 'devin_session_token' | 'devin_auth1_token' = 'password',
-  authProvider: 'firebase' | 'devin' | 'smart' = 'firebase'
+  // v1.7.6：新增 `'devin_native'` 支持纯 Devin 原生账号的批量导入
+  authProvider: 'firebase' | 'devin' | 'devin_native' | 'smart' = 'firebase'
 ) {
   // 获取并发设置
   const unlimitedConcurrent = settingsStore.settings?.unlimitedConcurrentRefresh || false;
@@ -1210,6 +1195,7 @@ async function handleBatchImportConfirm(
 
   const providerLabel =
     authProvider === 'devin' ? 'Devin'
+    : authProvider === 'devin_native' ? 'Devin 原生'
     : authProvider === 'smart' ? '智能识别'
     : 'Firebase';
   const modeLabel = mode === 'refresh_token' ? 'Refresh Token' : '邮箱密码';
@@ -1217,7 +1203,8 @@ async function handleBatchImportConfirm(
   // 多组织自动首选计数：批量结束后汇总提示
   let devinAutoOrgPickedCount = 0;
   // 智能模式下的嗅探结果：email -> 实际走的 provider
-  const resolvedProviders = new Map<string, 'firebase' | 'devin'>();
+  // 只给崇探成功且归类为 firebase/devin/devin_native 的账号记录；其余直接进入失败列表
+  const resolvedProviders = new Map<string, 'firebase' | 'devin' | 'devin_native'>();
   // 嗅探环节被跳过的账号（SSO / 未设密码 / 未注册 / 企业禁许 / 网络异常等）
   const skippedBySniff: Array<{ email: string; reason: string }> = [];
 
@@ -1262,8 +1249,13 @@ async function handleBatchImportConfirm(
         case 'devin':
           resolvedProviders.set(r.email, 'devin');
           break;
+        case 'devin_native':
+          // v1.7.6 新增：纯 Devin 原生账号，走 add_account_by_devin_native_login
+          resolvedProviders.set(r.email, 'devin_native');
+          break;
         default:
-          // sso / no_password / not_found / blocked —— 均无法自动导入，挂失败
+          // sso / no_password / not_found / blocked / devin_native_no_password
+          //   —— 均无法自动导入，挂失败
           skippedBySniff.push({
             email: r.email,
             reason: `[${r.sniff.recommended}] ${r.sniff.reason}`,
@@ -1292,13 +1284,13 @@ async function handleBatchImportConfirm(
     success: boolean;
     accountId?: string;
     error?: string;
-    effectiveProvider?: 'firebase' | 'devin';
+    effectiveProvider?: 'firebase' | 'devin' | 'devin_native';
   }> = skippedBySniff.map(s => ({ email: s.email, success: false, error: s.reason }));
 
   // 单个导入任务
   const importTask = async (item: { email: string; password: string; remark: string; refreshToken?: string }) => {
     // 计算本条实际走的 provider（智能模式从嗅探结果取，其余模式直接用 authProvider）
-    const effectiveProvider: 'firebase' | 'devin' =
+    const effectiveProvider: 'firebase' | 'devin' | 'devin_native' =
       authProvider === 'smart' ? resolvedProviders.get(item.email)! : authProvider;
 
     try {
@@ -1316,9 +1308,19 @@ async function handleBatchImportConfirm(
         } else {
           return { email: item.email, success: false, error: result.error || '添加失败', effectiveProvider };
         }
-      } else if (effectiveProvider === 'devin') {
-        // Devin 账密导入：调 add_account_by_devin_login；多组织时自动取 orgs[0] 再二次落库
-        const loginResult = await invoke<any>('add_account_by_devin_login', {
+      } else if (effectiveProvider === 'devin' || effectiveProvider === 'devin_native') {
+        // Devin 账密导入：根据 provider 选端口，其余逻辑（多组织自动首选 orgs[0]）完全共用
+        // - devin       → add_account_by_devin_login         （走 windsurf.com/_devin-auth/password/login）
+        // - devin_native→ add_account_by_devin_native_login  （走 app.devin.ai/api/auth1/password/login，v1.7.6）
+        // 后端两个命令的响应结构完全对齐（DevinLoginResult），后续 multi-org + fall-back
+        // 调用 add_account_by_devin_with_org 的链路并无差异。
+        const loginCommand =
+          effectiveProvider === 'devin_native'
+            ? 'add_account_by_devin_native_login'
+            : 'add_account_by_devin_login';
+        const providerTag = effectiveProvider === 'devin_native' ? '[Devin 原生]' : '[Devin]';
+
+        const loginResult = await invoke<any>(loginCommand, {
           email: item.email,
           password: item.password,
           nickname: item.remark || undefined,
@@ -1344,7 +1346,7 @@ async function handleBatchImportConfirm(
             return {
               email: item.email,
               success: false,
-              error: '[Devin] 多组织但 orgs[] 为空，无法自动选择',
+              error: `${providerTag} 多组织但 orgs[] 为空，无法自动选择`,
               effectiveProvider,
             };
           }
@@ -1353,11 +1355,12 @@ async function handleBatchImportConfirm(
             return {
               email: item.email,
               success: false,
-              error: '[Devin] 多组织响应缺失 auth1_token',
+              error: `${providerTag} 多组织响应缺失 auth1_token`,
               effectiveProvider,
             };
           }
           // 二次落库（使用首个组织）——传 password 让账号卡可回显用户原始密码
+          // add_account_by_devin_with_org 内部使用 auth1_token 调 WindsurfPostAuth，不区分端口来源
           const withOrgResult = await invoke<any>('add_account_by_devin_with_org', {
             email: item.email,
             auth1Token,
@@ -1380,7 +1383,7 @@ async function handleBatchImportConfirm(
           return {
             email: item.email,
             success: false,
-            error: withOrgResult?.error || '[Devin] 多组织二次落库失败',
+            error: withOrgResult?.error || `${providerTag} 多组织二次落库失败`,
             effectiveProvider,
           };
         }
@@ -1389,7 +1392,7 @@ async function handleBatchImportConfirm(
         return {
           email: item.email,
           success: false,
-          error: loginResult?.error || loginResult?.message || '[Devin] 登录失败',
+          error: loginResult?.error || loginResult?.message || `${providerTag} 登录失败`,
           effectiveProvider,
         };
       } else {
@@ -1409,10 +1412,34 @@ async function handleBatchImportConfirm(
     }
   };
   
+  // 节流刷新：每成功导入一个账号就刷新 UI，但间隔不小于 500ms
+  let lastRefreshTime = 0;
+  const throttledRefresh = () => {
+    const now = Date.now();
+    if (now - lastRefreshTime > 500) {
+      lastRefreshTime = now;
+      accountsStore.fetchPage().catch(() => {});
+      accountsStore.refreshAggregates().catch(() => {});
+    }
+  };
+
   try {
     if (unlimitedConcurrent) {
-      // 全量并发导入
-      const allResults = await Promise.all(itemsToImport.map(item => importTask(item)));
+      // 全量并发导入（带逐条进度 + 实时 UI 刷新）
+      let completedCount = 0;
+      const total = itemsToImport.length;
+      const allResults = await Promise.all(itemsToImport.map(async (item) => {
+        const result = await importTask(item);
+        completedCount++;
+        progressMsg.close();
+        progressMsg = ElMessage({
+          message: `导入进度: ${completedCount}/${total}（${result.success ? '✓' : '✗'} ${result.email}）`,
+          duration: 0,
+          icon: Loading
+        });
+        if (result.success) throttledRefresh();
+        return result;
+      }));
       results.push(...allResults);
     } else {
       // 分批并发处理
@@ -1420,6 +1447,8 @@ async function handleBatchImportConfirm(
         const batch = itemsToImport.slice(i, i + concurrencyLimit);
         const batchResults = await Promise.all(batch.map(item => importTask(item)));
         results.push(...batchResults);
+        // 每批完成后刷新 UI
+        throttledRefresh();
         
         // 更新进度
         progressMsg.close();
@@ -1512,7 +1541,14 @@ async function handleBatchImportConfirm(
       if (authProvider === 'smart') {
         const firebaseCount = addedAccounts.filter(r => r.effectiveProvider === 'firebase').length;
         const devinCount = addedAccounts.filter(r => r.effectiveProvider === 'devin').length;
-        message += `（Firebase ${firebaseCount} · Devin ${devinCount}）`;
+        const devinNativeCount = addedAccounts.filter(r => r.effectiveProvider === 'devin_native').length;
+        // v1.7.6：汇总说明补充 Devin 原生计数；既有版本不显示 0 的分类避免信息噪声
+        const segments = [
+          `Firebase ${firebaseCount}`,
+          `Devin ${devinCount}`,
+          ...(devinNativeCount > 0 ? [`Devin 原生 ${devinNativeCount}`] : []),
+        ];
+        message += `（${segments.join(' · ')}）`;
       }
       if (autoLogin && loginSuccessCount > 0) {
         message += `，${loginSuccessCount} 个已登录`;
@@ -1774,37 +1810,8 @@ async function handleBatchRefresh() {
     const successCount = result.success_count || 0;
     const failedCount = totalCount - successCount;
     
-    // 刷新成功的账号，从后端重新获取数据更新 store
-    if (result.results) {
-      for (const item of result.results) {
-        const idx = accountsStore.accounts.findIndex(a => a.id === item.id);
-        if (idx === -1) continue;
-        
-        if (item.success && item.data) {
-          const account = accountsStore.accounts[idx];
-          if (item.data.plan_name) account.plan_name = item.data.plan_name;
-          if (item.data.used_quota !== undefined) account.used_quota = item.data.used_quota;
-          if (item.data.total_quota !== undefined) account.total_quota = item.data.total_quota;
-          if (item.data.expires_at) account.token_expires_at = item.data.expires_at;
-          if (item.data.windsurf_api_key) account.windsurf_api_key = item.data.windsurf_api_key;
-          if (item.data.is_disabled !== undefined) account.is_disabled = item.data.is_disabled;
-          if (item.data.subscription_active !== undefined) account.subscription_active = item.data.subscription_active;
-          if (item.data.subscription_expires_at && typeof item.data.subscription_expires_at === 'number' && item.data.subscription_expires_at > 0) {
-            account.subscription_expires_at = dayjs.unix(item.data.subscription_expires_at).toISOString();
-          }
-          if (item.data.last_quota_update) account.last_quota_update = item.data.last_quota_update;
-          if (item.data.billing_strategy !== undefined) account.billing_strategy = item.data.billing_strategy;
-          if (item.data.daily_quota_remaining_percent !== undefined) account.daily_quota_remaining_percent = item.data.daily_quota_remaining_percent;
-          if (item.data.weekly_quota_remaining_percent !== undefined) account.weekly_quota_remaining_percent = item.data.weekly_quota_remaining_percent;
-          if (item.data.daily_quota_reset_at_unix !== undefined) account.daily_quota_reset_at_unix = item.data.daily_quota_reset_at_unix;
-          if (item.data.weekly_quota_reset_at_unix !== undefined) account.weekly_quota_reset_at_unix = item.data.weekly_quota_reset_at_unix;
-          if (item.data.overage_balance_micros !== undefined) account.overage_balance_micros = item.data.overage_balance_micros;
-          account.status = 'active';
-        } else {
-          accountsStore.accounts[idx].status = 'error';
-        }
-      }
-    }
+    // v1.7.8：后端已将刷新结果写入 SQLite，前端刷新当前页即可
+    await Promise.all([accountsStore.fetchPage(), accountsStore.refreshAggregates()]);
     
     // 显示结果
     if (failedCount === 0) {
@@ -1813,8 +1820,7 @@ async function handleBatchRefresh() {
       // 收集失败信息
       const failedItems = result.results?.filter((r: any) => !r.success) || [];
       const failedEmails = failedItems.slice(0, 3).map((item: any) => {
-        const account = accountsStore.accounts.find(a => a.id === item.id);
-        return `${account?.email || item.id}: ${item.error || '未知错误'}`;
+        return `${item.id}: ${item.error || '未知错误'}`;
       });
       
       const moreCount = failedItems.length - 3;
@@ -1844,15 +1850,23 @@ async function handleExportAccounts(selectedOnly: boolean = false) {
   try {
     let accounts;
     if (selectedOnly) {
-      // 导出选中的账号
-      accounts = accountsStore.filteredAccounts.filter(a => accountsStore.selectedAccounts.has(a.id));
+      if (accountsStore.selectedAccounts.size === 0) {
+        ElMessage.warning('没有选中的账号');
+        return;
+      }
+      // 全选时直接用 getAllAccounts，避免大量 ID 的分批查询开销
+      if (accountsStore.selectedAccounts.size >= accountsStore.aggregates.total_count) {
+        accounts = await accountApi.getAllAccounts();
+      } else {
+        accounts = await accountApi.getAccountsByIds(Array.from(accountsStore.selectedAccounts));
+      }
       if (accounts.length === 0) {
         ElMessage.warning('没有选中的账号');
         return;
       }
     } else {
-      // 导出所有账号
-      accounts = accountsStore.filteredAccounts;
+      // v1.7.8：导出全部账号需从后端获取全量（accounts 只存当前页）
+      accounts = await accountApi.getAllAccounts();
       if (accounts.length === 0) {
         ElMessage.warning('没有可导出的账号');
         return;
@@ -2130,13 +2144,19 @@ async function fetchCurrentWindsurfInfo() {
   }
 }
 
+// 打开批量更换订阅对话框（v1.7.8：从后端加载选中账号完整数据）
+async function openBatchUpdatePlanDialog() {
+  batchPlanAccounts.value = await accountApi.getAccountsByIds(Array.from(accountsStore.selectedAccounts));
+  showBatchUpdatePlanDialog.value = true;
+}
+
 // 关闭批量分组对话框
 function closeBatchGroupDialog() {
   showBatchGroupDialog.value = false;
   batchGroupTarget.value = '';
 }
 
-// 批量更改分组
+// 批量更改分组（v1.7.8：后端批量 API，支持跨页选中）
 async function handleBatchUpdateGroup() {
   const selectedIds = Array.from(accountsStore.selectedAccounts);
   if (selectedIds.length === 0) {
@@ -2152,35 +2172,13 @@ async function handleBatchUpdateGroup() {
   isBatchUpdatingGroup.value = true;
   
   try {
-    let successCount = 0;
-    let failedCount = 0;
-    
-    // 逐个更新账号的分组
-    for (const id of selectedIds) {
-      const account = accountsStore.accounts.find(a => a.id === id);
-      if (account) {
-        try {
-          const updatedAccount = { ...account, group: batchGroupTarget.value };
-          await accountsStore.updateAccount(updatedAccount);
-          successCount++;
-        } catch (error) {
-          console.error(`更新账号 ${account.email} 分组失败:`, error);
-          failedCount++;
-        }
-      }
-    }
-    
-    // 显示结果
-    if (failedCount === 0) {
-      ElMessage.success(`成功将 ${successCount} 个账号移动到"${batchGroupTarget.value}"分组`);
-    } else {
-      ElMessage.warning(`完成：成功 ${successCount} 个，失败 ${failedCount} 个`);
-    }
+    const affected = await accountApi.batchUpdateGroupByIds(selectedIds, batchGroupTarget.value);
+    ElMessage.success(`成功将 ${affected} 个账号移动到"${batchGroupTarget.value}"分组`);
     
     // 关闭对话框并刷新
     closeBatchGroupDialog();
     accountsStore.clearSelection();
-    await accountsStore.loadAccounts();
+    await Promise.all([accountsStore.fetchPage(), accountsStore.refreshAggregates()]);
   } catch (error) {
     ElMessage.error(`批量更改分组失败: ${error}`);
   } finally {
