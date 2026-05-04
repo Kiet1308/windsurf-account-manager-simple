@@ -91,7 +91,7 @@ onMounted(async () => {
   // 如果设置中有主题且与当前不同，则应用设置中的主题
   const settingsTheme = settingsStore.settings.theme;
   if (settingsTheme && settingsTheme !== uiStore.theme) {
-    uiStore.setTheme(settingsTheme as 'light' | 'dark');
+    uiStore.setTheme(settingsTheme);
   } else {
     // 确保当前主题被应用
     uiStore.setTheme(uiStore.theme);

@@ -206,8 +206,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     error.value = null;
     try {
       const account = await accountApi.addAccount(data);
-      // 增量插入：直接 push 到当前页数组末尾，新账号即时可见，无 loading 无页面刷新
-      accounts.value.push(account);
+      // 静默添加：只刷新聚合统计（total_count +1 → totalPages 自动更新），不 push 到当前页
       refreshAggregates().catch(() => {});
       return account;
     } catch (e) {
@@ -235,12 +234,10 @@ export const useAccountsStore = defineStore('accounts', () => {
    * 否则 push 到数组末尾。
    */
   function appendLocalAccount(account: Account) {
-    // 增量插入：按 id 去重后 push 到当前页数组末尾，新账号即时可见
+    // 已存在则原地替换（刷新场景），不存在则只刷新聚合统计
     const idx = accounts.value.findIndex(a => a.id === account.id);
     if (idx !== -1) {
       accounts.value.splice(idx, 1, account);
-    } else {
-      accounts.value.push(account);
     }
     refreshAggregates().catch(() => {});
   }

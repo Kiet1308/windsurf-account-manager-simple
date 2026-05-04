@@ -125,8 +125,26 @@
 
 ## 📜 版本历史
 
+### v1.7.8 (2026-05-04)
+- **Windsurf 新登录协议适配**：Windsurf 后端更新 `WindsurfPostAuth` 接口，新增要求 `X-Devin-Auth1-Token` HTTP header。已在 `devin_auth_service.rs::windsurf_post_auth` 中补充该 header，所有 Devin 登录/注册/多组织选择流程自动生效
+- **批量操作跨页选中性能优化**：新增 `get_accounts_by_ids` 后端 API（SQLite `WHERE id IN (...)` 精准查询），替代跨页选中时 `getAllAccounts()` 全量拉取 10 万+ 条再前端筛选的旧方案。导出选中、批量更换订阅等操作从秒级响应提升至毫秒级
+  - SQLite 32766 变量数限制：`get_accounts_by_ids` 和 `update_group_by_ids` 自动分批查询（每批 500），支持任意数量 ID
+  - 全选导出智能判断：选中数 ≥ 总数时直接走 `getAllAccounts()` 单次查询，避免无意义分批
+- **批量导入实时进度反馈**：全量并发导入模式新增逐条完成计数（`导入进度: 3/10（✓ xxx@email.com）`），替代原先全部完成才返回的静态提示；每个账号成功后节流刷新 UI（500ms），用户可实时看到账号列表变化
+- **注册/导入邮箱去重性能优化**：所有写入路径（`add_account_by_refresh_token` / `add_account_by_devin_login` / `add_account_by_devin_with_org` / `persist_devin_account_from_login_result` 等 6 处）的邮箱去重从 `get_all_accounts()` 全量加载遍历改为 SQLite `email_exists()` 索引查询，内存开销从数十 MB 降至 ~0，20 并发注册不再内存峰值飙升
+- **Pro 试用资格检查修复**：`check_pro_trial_eligibility` 命令从接收前端 `authToken` 改为接收 `account_id`，后端自行从 SQLite 读取完整账号构造正确的 `AuthContext`（Firebase/Devin 自动区分）。修复 Devin 账号始终误报"有试用资格"的 bug。同时保留 protobuf body 中的 token + 新增 `with_auth` headers 双重认证
+- **自动打开支付页面认证修复**：`get_trial_payment_link_enhanced` 命令同上改为接收 `account_id`，后端自行获取 token + 构造正确 AuthContext。修复开启「自动打开支付页面」后 Devin 账号 401 报错
+- **无感换号补丁同步主项目**：`switch_account_commands.rs` 新增 `OperationLog` 导入、`already_patched` 判断（避免重复应用日志误导）、切换成功后写操作日志；`patch_commands.rs` 应用/还原消息动态化（`config.process_name` 替代硬编码）、`check_seamless_status` 变量名对齐
+- **备份系统重构**：从单文件 `accounts_*.json` 升级为目录式 `backup_YYYYMMDD_HHMMSS/`，包含 `accounts.db` + 所有 JSON 文件（6 个）；`list_backups` / `restore_from_backup` / `delete_backup` / `cleanup` 全部改为目录操作；新增 `calculate_dir_size` 辅助方法；Settings 新增 `auto_backup_enabled` / `backup_interval` / `backup_max_count` 三个配置字段；`lib.rs` 新增自动备份任务（启动延迟 1 分钟，按配置间隔循环）
+- **统计信息界面升级**：后端 `get_stats` 新增 13 个统计字段（订阅类型分布、激活/未激活数、团队所有者、禁用账号、配额统计、标签/分组/操作类型分布、Token/RefreshToken 计数）；前端 `StatsDialog.vue` 从 3 个简单数字卡片升级为 9 区块完整面板（账号概览、订阅与认证、特殊账号、配额、订阅/分组/标签/操作类型分布、系统设置）
+- **添加账号静默模式**：`addAccount` / `appendLocalAccount` 不再触发 `fetchPage()` 整页刷新和 `loading` 状态，仅异步刷新聚合统计（侧边栏计数）。新账号在 SQLite 排序后位于正确页码，翻页可见
+- **TS 构建错误修复**：移除 `AutoResetDialog.vue` 中未使用的 `isMasterAccount` 函数，修复 `vue-tsc` TS6133 严格检查报错
+- **主题化视觉细节优化**：分页栏从固定浅蓝色改为基于 `--theme-primary` 的低饱和主题色，覆盖分页容器、页码按钮、当前页高亮和跳转输入框；订阅/套餐徽章在各主题下增强对比度和层次感，保留 Free / Pro / Teams / Enterprise 业务色区分的同时提升可读性
+- **批量导出账号重构为独立组件**：新增 `BatchExportDialog.vue` 替代 `MainLayout.vue` 中 `ElMessageBox + dangerouslyUseHTMLString` 的硬编码导出弹窗，消除内联样式并统一主题适配；导出入口只负责按当前选择范围获取账号并打开弹窗
+- **批量导出字段与格式增强**：支持自由组合邮箱、密码、Refresh Token、Access/Session Token、Windsurf API Key、Devin Auth1 Token、Devin Session Token、备注、分组、标签、状态、套餐、认证提供方、创建时间、Token 过期时间、订阅到期时间等字段；内置常用预设、导出预览、复制到剪贴板/下载文件两种目标
+- **批量导出文本分隔符增强**：TXT 支持空格、Tab、`|`、`,`、`---`、`----` 和自定义分隔符，并校验自定义分隔符不能为空；CSV/JSON 标准格式独立生成，CSV 支持按需包含表头并自动处理单元格转义与文件 BOM
 
-### v1.7.7 (2026-05-3)
+### v1.7.7 (2026-05-03)
 - **批量删除 O(N) 写盘黑洞修复（与主端同步）**：用户实测批量删除多账号时存在明显卡顿，疑似「不支持并发删除」。排查后根因是**后端循环串行 × 每次独立整文件写盘**的双重 IO 瓶颈，并非并发问题：原 `account_commands::delete_accounts_batch` 用 `for id_str in ids { store.delete_account(uuid).await; }` 循环调 `DataStore::delete_account`，后者每次都走 `save()` + `save_logs()`——即 2 次完整的 `atomic_write`（写临时文件 → JSON 校验 → 创建 `.backup` → 原子 rename）。50 个账号 = 100 次 atomic_write，在 NTFS / 防病毒实时扫描场景下耗时数秒到数十秒。**并发化（futures::join_all）并非正确解法**——所有 delete 仍竞争同一把 `config.write()` 写锁、伪并发实际串行，且独立 save 互相竞争文件句柄在 Windows 下反而可能触发 SharingViolation。本次从架构层面修复：
   - 新增 `DataStore::delete_accounts_batch(ids: &[Uuid]) -> AppResult<(Vec<Uuid>, Vec<Uuid>)>`：单次 `config.write()` 锁 + 用 `HashSet::intersection` 求交集定位实际存在的账号 + 单次 `retain` 批量移除 + 单次 `logs.write()` 锁 + 单次 `retain` 批量清理关联日志 + 各 1 次 `save()` / `save_logs()`。返回 `(deleted_ids, not_found_ids)`，空入参快速返回不触发写盘
   - `commands::delete_accounts_batch` tauri 命令改调新方法：先把 ids 按 UUID 合法性分离 valid/invalid，批量调 `DataStore::delete_accounts_batch` 拿到 deleted + not_found，把 not_found 合并到 failed_ids。**返回结构 `{success_count, failed_ids}` 保持原语义不变，前端零改动**

@@ -405,6 +405,7 @@ impl DevinAuthService {
             .header("sec-fetch-dest", "empty")
             .header("sec-fetch-mode", "cors")
             .header("sec-fetch-site", "same-site")
+            .header("X-Devin-Auth1-Token", auth1_token)
             .send()
             .await
             .map_err(|e| {

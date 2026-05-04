@@ -621,6 +621,9 @@ function getTagStyle(tagName: string): Record<string, string> {
   // 如果没有找到颜色，返回默认样式（而不是空对象）
   if (!color) {
     return {
+      '--account-tag-bg': 'rgba(64, 158, 255, 0.1)',
+      '--account-tag-border': 'rgba(64, 158, 255, 0.3)',
+      '--account-tag-color': 'rgba(64, 158, 255, 1)',
       backgroundColor: 'rgba(64, 158, 255, 0.1)',
       borderColor: 'rgba(64, 158, 255, 0.3)',
       color: 'rgba(64, 158, 255, 1)',
@@ -635,16 +638,25 @@ function getTagStyle(tagName: string): Record<string, string> {
     const bgAlpha = Math.min(a * 0.2, 0.3);
     // 边框使用稍高透明度
     const borderAlpha = Math.min(a * 0.5, 0.6);
+    const tagBackground = `rgba(${r}, ${g}, ${b}, ${bgAlpha})`;
+    const tagBorder = `rgba(${r}, ${g}, ${b}, ${borderAlpha})`;
+    const tagColor = `rgba(${r}, ${g}, ${b}, ${Math.max(a, 0.8)})`;
     return {
-      backgroundColor: `rgba(${r}, ${g}, ${b}, ${bgAlpha})`,
-      borderColor: `rgba(${r}, ${g}, ${b}, ${borderAlpha})`,
-      color: `rgba(${r}, ${g}, ${b}, ${Math.max(a, 0.8)})`,
-      border: `1px solid rgba(${r}, ${g}, ${b}, ${borderAlpha})`
+      '--account-tag-bg': tagBackground,
+      '--account-tag-border': tagBorder,
+      '--account-tag-color': tagColor,
+      backgroundColor: tagBackground,
+      borderColor: tagBorder,
+      color: tagColor,
+      border: `1px solid ${tagBorder}`
     };
   }
   
   // 如果颜色解析失败，尝试直接使用颜色值
   return {
+    '--account-tag-bg': color,
+    '--account-tag-border': color,
+    '--account-tag-color': '#fff',
     backgroundColor: color,
     borderColor: color,
     color: '#fff'

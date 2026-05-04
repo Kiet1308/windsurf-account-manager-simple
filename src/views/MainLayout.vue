@@ -146,6 +146,10 @@
         </div>
         
         <div class="header-right">
+          <el-tooltip content="主题配色" placement="bottom">
+            <ThemeSelector v-model="uiStore.theme" @change="uiStore.setTheme" />
+          </el-tooltip>
+
           <!-- 批量删除 -->
           <el-tooltip content="批量删除" placement="bottom" v-if="accountsStore.selectedAccounts.size > 0">
             <el-badge :value="accountsStore.selectedAccounts.size" :offset="[12, -8]">
@@ -430,6 +434,10 @@
       @import="handleBatchImportConfirm" 
       ref="batchImportDialogRef"
     />
+    <BatchExportDialog
+      v-model="showBatchExportDialog"
+      :accounts="batchExportAccounts"
+    />
     <LogsDialog />
     <StatsDialog />
     <AccountInfoDialog />
@@ -629,6 +637,7 @@ import AddAccountDialog from '@/components/AddAccountDialog.vue';
 import EditAccountDialog from '@/components/EditAccountDialog.vue';
 import SettingsDialog from '@/components/SettingsDialog.vue';
 import BatchImportDialog from '@/components/BatchImportDialog.vue';
+import BatchExportDialog from '@/components/BatchExportDialog.vue';
 import LogsDialog from '@/components/LogsDialog.vue';
 import StatsDialog from '@/components/StatsDialog.vue';
 import BillingDialog from '@/components/BillingDialog.vue';
@@ -640,6 +649,7 @@ import BatchUpdatePlanDialog from '@/components/BatchUpdatePlanDialog.vue';
 import TagManageDialog from '@/components/TagManageDialog.vue';
 import AutoResetDialog from '@/components/AutoResetDialog.vue';
 import CardGeneratorDialog from '@/components/CardGeneratorDialog.vue';
+import ThemeSelector from '@/components/ThemeSelector.vue';
 
 const accountsStore = useAccountsStore();
 const settingsStore = useSettingsStore();
@@ -660,6 +670,8 @@ const updaterStore = useUpdaterStore();
 const showTagManageDialog = ref(false);
 const showBatchImportDialog = ref(false);
 const batchImportDialogRef = ref<InstanceType<typeof BatchImportDialog> | null>(null);
+const showBatchExportDialog = ref(false);
+const batchExportAccounts = ref<Account[]>([]);
 const appVersion = ref<string>('');  // 版本号从后端动态获取
 const showBatchGroupDialog = ref(false);
 const batchGroupTarget = ref('');
@@ -1845,13 +1857,12 @@ async function handleBatchRefresh() {
   }
 }
 
-// 导出账号
 async function handleExportAccounts(selectedOnly: boolean = false) {
   try {
-    let accounts;
+    let accounts: Account[];
     if (selectedOnly) {
       if (accountsStore.selectedAccounts.size === 0) {
-        ElMessage.warning('没有选中的账号');
+        ElMessage.warning('请先选择要导出的账号');
         return;
       }
       // 全选时直接用 getAllAccounts，避免大量 ID 的分批查询开销
@@ -1872,183 +1883,8 @@ async function handleExportAccounts(selectedOnly: boolean = false) {
         return;
       }
     }
-    
-    // 按待导出账号集合能力，决定 Devin 两个选项是否渲染
-    // - Auth1 Token：至少一个账号持有 devin_auth1_token
-    // - Session Token：至少一个 Devin 认证提供方账号且 token 非空
-    const hasDevinAuth1 = accounts.some(a => !!a.devin_auth1_token);
-    const hasDevinSession = accounts.some(a => a.auth_provider === 'devin' && !!a.token);
-
-    const devinAuth1OptionHtml = hasDevinAuth1 ? `
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportContent" value="devin_auth1_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">邮箱 + Devin Auth1 Token</span>
-            <span style="color: #909399; margin-left: 8px;">可二次换取 session / 换机迁移</span>
-          </label>` : '';
-    const devinSessionOptionHtml = hasDevinSession ? `
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportContent" value="devin_session_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">邮箱 + Devin Session Token</span>
-            <span style="color: #909399; margin-left: 8px;">当前登录会话凭证（短期有效）</span>
-          </label>` : '';
-
-    // 创建 HTML 字符串形式的单选按钮
-    const radioHtml = `
-      <div style="padding: 20px 0;">
-        <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #ebeef5;">
-          <div style="font-weight: 500; margin-bottom: 10px; color: #606266;">导出内容</div>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportContent" value="password" checked style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">邮箱 + 密码</span>
-            <span style="color: #909399; margin-left: 8px;">传统登录凭证</span>
-          </label>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportContent" value="refresh_token" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">邮箱 + Refresh Token</span>
-            <span style="color: #909399; margin-left: 8px;">可直接刷新获取账号信息</span>
-          </label>${devinAuth1OptionHtml}${devinSessionOptionHtml}
-        </div>
-        <div style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #ebeef5;">
-          <div style="font-weight: 500; margin-bottom: 10px; color: #606266;">导出格式</div>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportFormat" value="3" checked style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">文本格式</span>
-            <span style="color: #909399; margin-left: 8px;">简单列表</span>
-          </label>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportFormat" value="1" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">CSV格式</span>
-            <span style="color: #909399; margin-left: 8px;">适合 Excel 打开</span>
-          </label>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportFormat" value="2" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">JSON格式</span>
-            <span style="color: #909399; margin-left: 8px;">适合程序处理</span>
-          </label>
-        </div>
-        <div>
-          <div style="font-weight: 500; margin-bottom: 10px; color: #606266;">导出方式</div>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportTarget" value="clipboard" checked style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">复制到剪贴板</span>
-            <span style="color: #909399; margin-left: 8px;">直接粘贴使用</span>
-          </label>
-          <label style="display: block; margin: 10px 0; cursor: pointer; font-size: 14px;">
-            <input type="radio" name="exportTarget" value="file" style="margin-right: 10px; cursor: pointer; transform: scale(1.2);" />
-            <span style="font-weight: 500;">下载文件</span>
-            <span style="color: #909399; margin-left: 8px;">保存到本地</span>
-          </label>
-        </div>
-      </div>
-    `;
-    
-    await ElMessageBox({
-      title: '选择导出格式',
-      message: radioHtml,
-      showCancelButton: true,
-      confirmButtonText: '导出',
-      cancelButtonText: '取消',
-      dangerouslyUseHTMLString: true,
-      customClass: 'export-dialog',
-      beforeClose: (action, instance, done) => {
-        if (action === 'confirm') {
-          const radioElement = document.querySelector('input[name="exportFormat"]:checked') as HTMLInputElement;
-          if (radioElement) {
-            (instance as any).selectedValue = radioElement.value;
-          }
-        }
-        done();
-      }
-    });
-    
-    // 获取选中的值
-    const selectedContentRadio = document.querySelector('input[name="exportContent"]:checked') as HTMLInputElement;
-    const selectedFormatRadio = document.querySelector('input[name="exportFormat"]:checked') as HTMLInputElement;
-    const selectedTargetRadio = document.querySelector('input[name="exportTarget"]:checked') as HTMLInputElement;
-    const exportContent = selectedContentRadio ? selectedContentRadio.value : 'password';
-    const format = selectedFormatRadio ? selectedFormatRadio.value : '1';
-    const target = selectedTargetRadio ? selectedTargetRadio.value : 'file';
-    
-    // 根据导出内容类型获取凭证
-    // devin_session_token 仅对 auth_provider==='devin' 的账号有意义：
-    // 旧 Firebase 账号的 token 字段持有 Firebase access_token，将其作为 Devin session 导出会产生误导，因此置空
-    const getCredential = (account: any) => {
-      switch (exportContent) {
-        case 'refresh_token':
-          return account.refresh_token || '';
-        case 'devin_auth1_token':
-          return account.devin_auth1_token || '';
-        case 'devin_session_token':
-          return account.auth_provider === 'devin' ? (account.token || '') : '';
-        case 'password':
-        default:
-          return account.password || '';
-      }
-    };
-
-    const credentialMeta: Record<string, { label: string; key: string; fileSuffix: string }> = {
-      password:            { label: '密码',                key: 'password',            fileSuffix: ''        },
-      refresh_token:       { label: 'Refresh Token',       key: 'refresh_token',       fileSuffix: '_token'  },
-      devin_auth1_token:   { label: 'Devin Auth1 Token',   key: 'devin_auth1_token',   fileSuffix: '_auth1'  },
-      devin_session_token: { label: 'Devin Session Token', key: 'devin_session_token', fileSuffix: '_session'},
-    };
-    const meta = credentialMeta[exportContent] || credentialMeta.password;
-    const credentialLabel = meta.label;
-    const credentialKey = meta.key;
-
-    let content = '';
-    let filename = '';
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-    const fileSuffix = meta.fileSuffix;
-    
-    switch(format) {
-      case '1': // CSV
-        // 剪贴板不需要 BOM
-        content = target === 'clipboard' ? `邮箱,${credentialLabel},备注,分组,状态,套餐\n` : `\uFEFF邮箱,${credentialLabel},备注,分组,状态,套餐\n`;
-        accounts.forEach(account => {
-          content += `"${account.email}","${getCredential(account)}","${account.nickname || ''}","${account.group || ''}","${account.status || ''}","${account.plan_name || ''}"\n`;
-        });
-        filename = `accounts${fileSuffix}_${timestamp}.csv`;
-        break;
-        
-      case '2': // JSON
-        content = JSON.stringify(accounts.map(account => ({
-          email: account.email,
-          [credentialKey]: getCredential(account),
-          remark: account.nickname,
-          group: account.group,
-          status: account.status,
-          plan: account.plan_name
-        })), null, 2);
-        filename = `accounts${fileSuffix}_${timestamp}.json`;
-        break;
-        
-      case '3': // 文本
-        accounts.forEach(account => {
-          content += `${account.email} ${getCredential(account)}\n`;
-        });
-        filename = `accounts${fileSuffix}_${timestamp}.txt`;
-        break;
-    }
-    
-    if (target === 'clipboard') {
-      // 复制到剪贴板
-      await navigator.clipboard.writeText(content);
-      ElMessage.success(`已复制 ${accounts.length} 个账号到剪贴板`);
-    } else {
-      // 创建下载链接
-      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-      
-      ElMessage.success(`已导出 ${accounts.length} 个账号`);
-    }
+    batchExportAccounts.value = accounts;
+    showBatchExportDialog.value = true;
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error(`导出失败: ${error}`);
