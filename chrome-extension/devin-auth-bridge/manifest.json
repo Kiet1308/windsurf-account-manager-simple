@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "WAM Devin Auth Bridge",
+  "version": "1.0.0",
+  "description": "Automatically imports Devin auth tokens into Windsurf Account Manager.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://devin.ai/*",
+    "https://*.devin.ai/*",
+    "http://127.0.0.1:19876/*",
+    "http://127.0.0.1:19877/*",
+    "http://127.0.0.1:19878/*",
+    "http://127.0.0.1:19879/*",
+    "http://127.0.0.1:19880/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://devin.ai/*", "https://*.devin.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "WAM Devin Auth Bridge",
+    "default_popup": "popup.html"
+  }
+}

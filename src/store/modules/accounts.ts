@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import { ElMessage } from 'element-plus';
 import type { Account, AccountFilter, PaginationConfig, SortConfig, SortField, SortDirection } from '@/types';
 import { accountApi, apiService, settingsApi } from '@/api';
 import type { AccountPageRequest, AccountAggregates } from '@/api';
@@ -124,8 +125,10 @@ export const useAccountsStore = defineStore('accounts', () => {
    * 将 currentFilter + pagination + sortConfig 组装为 AccountPageRequest，
    * 调用后端 `get_accounts_page`，仅拉取 20-100 条。IPC 传输从 300MB 降到 <100KB。
    */
-  async function fetchPage() {
-    loading.value = true;
+  async function fetchPage(silent = false) {
+    if (!silent) {
+      loading.value = true;
+    }
     error.value = null;
     try {
       const f = currentFilter.value;
@@ -159,7 +162,9 @@ export const useAccountsStore = defineStore('accounts', () => {
       error.value = (e as Error).message;
       throw e;
     } finally {
-      loading.value = false;
+      if (!silent) {
+        loading.value = false;
+      }
     }
   }
 
@@ -462,6 +467,8 @@ export const useAccountsStore = defineStore('accounts', () => {
 
   // 自动刷新Token功能
   const autoRefreshTimerId = ref<number | null>(null);
+  const autoSwitchTimerId = ref<number | null>(null);
+  const autoSwitchChecking = ref(false);
   const refreshingAccounts = ref<Set<string>>(new Set()); // 跟踪正在刷新的账号
 
   /**
@@ -756,6 +763,61 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
+  async function checkAndAutoSwitchAccount(settingsStore?: any) {
+    const settings = settingsStore?.settings;
+    if (!settings?.autoSwitchAccountEnabled || autoSwitchChecking.value) {
+      return;
+    }
+
+    autoSwitchChecking.value = true;
+    let shouldRefreshUsage = false;
+    try {
+      shouldRefreshUsage = true;
+      const result = await apiService.checkAndAutoSwitchAccount();
+      if (result.switched) {
+        ElMessage.success(result.message || `Auto-switched to ${result.target_email || 'the next account'}`);
+        await refreshAggregates();
+      } else if (result.reason) {
+        console.log(`[Auto-Switch] ${result.reason}`);
+      }
+    } catch (error) {
+      console.error('[Auto-Switch] Check failed:', error);
+    } finally {
+      if (shouldRefreshUsage) {
+        await fetchPage(true).catch((error) => {
+          console.error('[Auto-Switch] Failed to refresh account usage UI:', error);
+        });
+      }
+      autoSwitchChecking.value = false;
+    }
+  }
+
+  function startAutoSwitchTimer(settingsStore?: any) {
+    stopAutoSwitchTimer();
+
+    const settings = settingsStore?.settings;
+    if (!settings?.autoSwitchAccountEnabled) {
+      console.log('[Auto-Switch] Auto-switch account is disabled');
+      return;
+    }
+
+    const intervalSeconds = Math.max(1, Math.min(3600, Number(settings.autoSwitchCheckInterval || 1)));
+    console.log(`[Auto-Switch] Started quota check timer, interval ${intervalSeconds} second(s)`);
+
+    checkAndAutoSwitchAccount(settingsStore);
+    autoSwitchTimerId.value = window.setInterval(() => {
+      checkAndAutoSwitchAccount(settingsStore);
+    }, intervalSeconds * 1000);
+  }
+
+  function stopAutoSwitchTimer() {
+    if (autoSwitchTimerId.value !== null) {
+      clearInterval(autoSwitchTimerId.value);
+      autoSwitchTimerId.value = null;
+      console.log('[Auto-Switch] Timer stopped');
+    }
+  }
+
   // ==================== 排序功能 ====================
 
   /**
@@ -878,6 +940,9 @@ export const useAccountsStore = defineStore('accounts', () => {
     checkAndRefreshExpiredTokens,
     startAutoRefreshTimer,
     stopAutoRefreshTimer,
+    checkAndAutoSwitchAccount,
+    startAutoSwitchTimer,
+    stopAutoSwitchTimer,
     
     // 批量更新优化
     flushPendingUpdates,

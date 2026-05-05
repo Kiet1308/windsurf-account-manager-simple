@@ -21,6 +21,40 @@
               开启后，自动刷新Token时所有账号同时并发，不受并发限制，可大幅节省时间
             </div>
           </el-form-item>
+
+          <el-form-item label="Auto-Switch Account">
+            <el-switch
+              v-model="settings.autoSwitchAccountEnabled"
+              active-text="Enabled"
+              inactive-text="Disabled"
+            />
+            <div style="margin-top: 5px; color: #909399; font-size: 12px;">
+              Automatically switches to the next available account when the active account reaches the daily or weekly quota threshold.
+            </div>
+          </el-form-item>
+
+          <el-form-item label="Check Interval" v-if="settings.autoSwitchAccountEnabled">
+            <el-input-number
+              v-model="settings.autoSwitchCheckInterval"
+              :min="1"
+              :max="3600"
+              :step="1"
+            />
+            <span style="margin-left: 8px; color: #909399;">seconds</span>
+          </el-form-item>
+
+          <el-form-item label="Quota Threshold" v-if="settings.autoSwitchAccountEnabled">
+            <el-input-number
+              v-model="settings.autoSwitchQuotaThreshold"
+              :min="0"
+              :max="100"
+              :step="1"
+            />
+            <span style="margin-left: 8px; color: #909399;">%</span>
+            <div style="margin-top: 5px; color: #909399; font-size: 12px;">
+              Switch when daily or weekly remaining quota is less than or equal to this value.
+            </div>
+          </el-form-item>
           
           <!-- 座位数选项 - simple 版本已禁用
           <el-form-item label="座位数选项">
@@ -724,6 +758,9 @@ const settings = reactive<{
   testModeEnabled: boolean;
   useLocalSuccessBins: boolean;
   seamlessSwitchEnabled: boolean;
+  autoSwitchAccountEnabled: boolean;
+  autoSwitchCheckInterval: number;
+  autoSwitchQuotaThreshold: number;
   windsurfClientType: 'windsurf' | 'windsurf-next';
   windsurfPath: string | null;
   patchBackupPath: string | null;
@@ -761,6 +798,9 @@ const settings = reactive<{
   testModeEnabled: false,  // 默认关闭测试模式
   useLocalSuccessBins: false,  // 默认不使用本地BIN池
   seamlessSwitchEnabled: false,  // 默认关闭无感换号
+  autoSwitchAccountEnabled: false,
+  autoSwitchCheckInterval: 1,
+  autoSwitchQuotaThreshold: 0,
   windsurfClientType: 'windsurf',  // 默认 Windsurf 客户端
   windsurfPath: null,  // Windsurf路径
   patchBackupPath: null,  // 补丁备份路径

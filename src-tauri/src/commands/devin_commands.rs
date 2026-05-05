@@ -1072,6 +1072,29 @@ pub async fn add_account_by_devin_auth1_token(
     auto_select_primary_org: Option<bool>,
     store: State<'_, Arc<DataStore>>,
 ) -> Result<serde_json::Value, String> {
+    import_devin_auth1_token_account(
+        auth1_token,
+        org_id,
+        nickname,
+        tags,
+        group,
+        auto_select_primary_org,
+        store.inner(),
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn import_devin_auth1_token_account(
+    auth1_token: String,
+    org_id: Option<String>,
+    nickname: Option<String>,
+    tags: Vec<String>,
+    group: Option<String>,
+    auto_select_primary_org: Option<bool>,
+    store: &Arc<DataStore>,
+    existing_as_success: bool,
+) -> Result<serde_json::Value, String> {
     let token_trimmed = auth1_token.trim().to_string();
     if !token_trimmed.starts_with("auth1_") {
         return Err("auth1_token 必须以 `auth1_` 前缀开头，当前输入无效".to_string());
@@ -1159,6 +1182,15 @@ pub async fn add_account_by_devin_auth1_token(
 
     // Step 4: 落库 —— 已存在检查（SQLite 精准查询）
     if store.account_store.email_exists(&email).unwrap_or(false) {
+        if existing_as_success {
+            return Ok(json!({
+                "success": true,
+                "already_exists": true,
+                "requires_org_selection": false,
+                "email": email,
+                "message": "Account already exists"
+            }));
+        }
         return Err(format!("账号 {} 已存在", email));
     }
 
@@ -1172,10 +1204,25 @@ pub async fn add_account_by_devin_auth1_token(
 
     // v1.7.8 批量导入性能修复：_no_save 变体 + 末尾 request_save_coalesced 合并落盘
     // auth1_token 迁入场景无原始密码，password 字段留空
-    let mut account = store
+    let mut account = match store
         .add_account_no_save(email.clone(), String::new(), final_nickname)
         .await
-        .map_err(|e| e.to_string())?;
+    {
+        Ok(account) => account,
+        Err(e) => {
+            let err = e.to_string();
+            if existing_as_success && err.to_lowercase().contains("already exists") {
+                return Ok(json!({
+                    "success": true,
+                    "already_exists": true,
+                    "requires_org_selection": false,
+                    "email": email,
+                    "message": "Account already exists"
+                }));
+            }
+            return Err(err);
+        }
+    };
 
     account.tags = tags;
     account.group = group;
@@ -1220,7 +1267,7 @@ pub async fn add_account_by_devin_auth1_token(
     let _ = store.add_log(log).await;
 
     // v1.7.8 批量导入性能修复：统一触发一次合并落盘（非阻塞）
-    store.inner().request_save_coalesced();
+    store.request_save_coalesced();
 
     Ok(json!({
         "success": true,

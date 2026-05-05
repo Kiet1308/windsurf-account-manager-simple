@@ -106,6 +106,12 @@ pub struct Settings {
     pub test_mode_last_bin: Option<String>,  // 测试模式下上次使用的BIN（用于顺序遍历）
     #[serde(default, rename = "seamlessSwitchEnabled")]
     pub seamless_switch_enabled: bool,  // 是否启用无感换号
+    #[serde(default, rename = "autoSwitchAccountEnabled")]
+    pub auto_switch_account_enabled: bool,
+    #[serde(default = "default_auto_switch_check_interval", rename = "autoSwitchCheckInterval")]
+    pub auto_switch_check_interval: i32,
+    #[serde(default, rename = "autoSwitchQuotaThreshold")]
+    pub auto_switch_quota_threshold: i32,
     #[serde(default = "default_windsurf_client_type", rename = "windsurfClientType")]
     pub windsurf_client_type: String,  // 客户端类型: "windsurf" 或 "windsurf-next"
     #[serde(default, rename = "windsurfPath")]
@@ -180,6 +186,10 @@ fn default_backup_max_count() -> i32 {
     10  // 默认10份
 }
 
+fn default_auto_switch_check_interval() -> i32 {
+    1
+}
+
 fn default_windsurf_client_type() -> String {
     "windsurf".to_string()
 }
@@ -206,6 +216,9 @@ impl Default for Settings {
             use_local_success_bins: false,  // 默认不使用本地成功BIN池
             test_mode_last_bin: None,  // 测试模式进度
             seamless_switch_enabled: false,  // 默认关闭无感换号
+            auto_switch_account_enabled: false,
+            auto_switch_check_interval: 1,
+            auto_switch_quota_threshold: 0,
             windsurf_client_type: "windsurf".to_string(),
             windsurf_path: None,
             patch_backup_path: None,

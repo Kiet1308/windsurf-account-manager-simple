@@ -496,6 +496,9 @@ export interface Settings {
   useLocalSuccessBins?: boolean;  // 使用本地成功BIN池
   testModeLastBin?: string | null;  // 测试模式下上次使用的BIN（用于顺序遍历）
   seamlessSwitchEnabled?: boolean;  // 是否启用无感换号
+  autoSwitchAccountEnabled?: boolean;
+  autoSwitchCheckInterval?: number;
+  autoSwitchQuotaThreshold?: number;
   windsurfClientType?: 'windsurf' | 'windsurf-next';  // 客户端类型
   windsurfPath?: string | null;  // Windsurf安装路径
   patchBackupPath?: string | null;  // 补丁备份文件路径

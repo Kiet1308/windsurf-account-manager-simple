@@ -30,6 +30,7 @@ pub fn run() {
             
             // 将数据存储注入到应用状态
             app.manage(store.clone());
+            services::start_devin_extension_bridge(app.handle().clone(), store.clone());
             
             // 初始化自动重置配置存储
             let auto_reset_store = AutoResetStore::new(app.handle())
@@ -199,6 +200,7 @@ pub fn run() {
             
             // 切号相关命令
             commands::switch_account,
+            commands::check_and_auto_switch_account,
             commands::reset_machine_id,
             commands::check_admin_privileges,
             

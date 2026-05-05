@@ -396,6 +396,26 @@ export const apiService = {
   }> {
     return await invoke('switch_account', { id });
   },
+
+  async checkAndAutoSwitchAccount(): Promise<{
+    success: boolean;
+    enabled?: boolean;
+    switched: boolean;
+    reason?: string;
+    message?: string;
+    current_account_id?: string;
+    current_email?: string;
+    target_account_id?: string;
+    target_email?: string;
+    daily_quota_remaining_percent?: number;
+    weekly_quota_remaining_percent?: number;
+    target_daily_quota_remaining_percent?: number;
+    target_weekly_quota_remaining_percent?: number;
+    threshold?: number;
+    error?: string;
+  }> {
+    return await invoke('check_and_auto_switch_account');
+  },
   
   /**
    * 重置机器ID

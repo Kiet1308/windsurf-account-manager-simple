@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WAM Devin Auth Bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <h1>Devin Auth Bridge</h1>
+      <p class="subtitle">Import Devin logins into Windsurf Account Manager automatically.</p>
+      <section class="status-card">
+        <div class="row">
+          <span>Status</span>
+          <strong id="status">Idle</strong>
+        </div>
+        <div class="row">
+          <span>Email</span>
+          <strong id="email">-</strong>
+        </div>
+        <div class="row">
+          <span>Bridge Port</span>
+          <strong id="port">-</strong>
+        </div>
+        <div class="row">
+          <span>Updated</span>
+          <strong id="updated">-</strong>
+        </div>
+      </section>
+      <p id="message" class="message">Open Devin and sign in. Keep Windsurf Account Manager running.</p>
+      <button id="openDevin" type="button">Open Devin</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

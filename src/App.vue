@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, computed } from 'vue';
-import { ElConfigProvider } from 'element-plus';
+import { onMounted, onUnmounted, computed, watch } from 'vue';
+import { ElConfigProvider, ElMessage } from 'element-plus';
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs';
 import { useAccountsStore, useSettingsStore, useUIStore } from './store';
 import MainLayout from './views/MainLayout.vue';
@@ -16,6 +16,7 @@ const uiStore = useUIStore();
 
 // 事件监听取消函数
 let tokenRefreshedUnlisten: UnlistenFn | null = null;
+let devinAuthImportUnlisten: UnlistenFn | null = null;
 
 // 用于Element Plus的命名空间，支持深色模式
 const elNamespace = computed(() => 'el');
@@ -99,6 +100,7 @@ onMounted(async () => {
   
   // 启动自动刷新Token功能
   accountsStore.startAutoRefreshTimer(settingsStore);
+  accountsStore.startAutoSwitchTimer(settingsStore);
   
   // 监听后端 token 刷新事件，自动更新前端账户数据
   tokenRefreshedUnlisten = await listen<{ account_id: string; token: string; token_expires_at: string }>('token-refreshed', (event) => {
@@ -109,11 +111,29 @@ onMounted(async () => {
     accountsStore.fetchPage().catch(() => {});
     console.log('[Token刷新事件] 已触发页面刷新');
   });
+
+  devinAuthImportUnlisten = await listen<{ success: boolean; status: string; email?: string; message: string }>('devin-auth1-token-imported', async (event) => {
+    const payload = event.payload;
+    if (payload.status === 'imported') {
+      await Promise.all([
+        accountsStore.fetchPage(true),
+        accountsStore.refreshAggregates(),
+      ]);
+      ElMessage.success(`Devin account imported${payload.email ? `: ${payload.email}` : ''}`);
+    } else if (payload.status === 'already_exists') {
+      ElMessage.info(`Devin account already exists${payload.email ? `: ${payload.email}` : ''}`);
+    } else if (payload.status === 'requires_org_selection') {
+      ElMessage.warning('Devin account import requires organization selection');
+    } else if (!payload.success) {
+      ElMessage.error(`Devin token import failed: ${payload.message}`);
+    }
+  });
 });
 
 // 组件卸载时停止定时器和移除事件监听
 onUnmounted(() => {
   accountsStore.stopAutoRefreshTimer();
+  accountsStore.stopAutoSwitchTimer();
   document.removeEventListener('contextmenu', disableContextMenu);
   document.removeEventListener('keydown', disableDebugKeys);
   // 取消 Tauri 事件监听
@@ -121,7 +141,22 @@ onUnmounted(() => {
     tokenRefreshedUnlisten();
     tokenRefreshedUnlisten = null;
   }
+  if (devinAuthImportUnlisten) {
+    devinAuthImportUnlisten();
+    devinAuthImportUnlisten = null;
+  }
 });
+
+watch(
+  () => [
+    settingsStore.settings.autoSwitchAccountEnabled,
+    settingsStore.settings.autoSwitchCheckInterval,
+    settingsStore.settings.autoSwitchQuotaThreshold,
+  ],
+  () => {
+    accountsStore.startAutoSwitchTimer(settingsStore);
+  }
+);
 
 </script>
 

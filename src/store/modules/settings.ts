@@ -12,6 +12,9 @@ const defaultSettings: Partial<Settings> = {
   concurrent_limit: 5,
   show_seats_result_dialog: false,
   useLightweightApi: true,
+  autoSwitchAccountEnabled: false,
+  autoSwitchCheckInterval: 1,
+  autoSwitchQuotaThreshold: 0,
   proxyEnabled: false,
   proxyUrl: null,
 };
